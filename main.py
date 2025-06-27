@@ -3,12 +3,67 @@ import os
 import naive
 import hmm 
 import slm 
+import subprocess
+import tempfile
+import glob
+import transformers
 
 def build(): 
     pass
 
-def deploy(): 
-    pass
+def run_subprocess(cmd, output=False): 
+    """
+    Shell out to run a provided command.
+
+    NOTE: assist from chatgpt on syntax: https://chatgpt.com/share/685ef572-0b24-8013-99df-fab2155c6e80
+    """
+    try:
+        result = subprocess.run(cmd,text=True, capture_output=output)
+        return True, result.stdout
+        
+    except subprocess.CalledProcessError as e:
+        return False, e.stderr
+        
+def deploy_demo(token): 
+    """
+    Deploy a model to HuggingFace Spaces, optionally refreshing the code in the 
+    container prior
+    """
+    
+    # Inconsistent results pushing via huggingface-cli and https, rely on 
+    # SSH (pubkey loaded on distant end) 
+    spaces_https_url = "https://huggingface.co/spaces/3emaphor/forklift"
+    spaces_git_url = "git@hf.co:spaces/3emaphor/forklift"
+
+    try:        
+        with tempfile.TemporaryDirectory() as tmp: 
+
+            print("Attempting to push ./demo/* to {spaces_git_url}...")
+            cmds = []
+            cmds.append(["git", "clone", spaces_git_url, tmp]) 
+            cmds.append(["cp"] + glob.glob("./demo/*") + [tmp])
+            cmds.append(["git", "-C", tmp, "add", "."])
+            cmds.append(["git", "-C", tmp, "commit", "-m", "automated deploy"])
+            cmds.append(["git", "-C", tmp, "push"])
+            
+            for cmd in cmds: 
+                result, text = run_subprocess(cmd) 
+
+            print("Completed! {spaces_https_url} should be redeploying ... now. ")
+        
+    except subprocess.CalledProcessError as e:
+        return False, e.stderr
+        
+    return result, text
+
+def deploy(token, model, refresh=False): 
+    """
+    Deploy a model, optionall refreshing the underlying demo app in the process. 
+    NOTE: we've got a copy of the token here, but really just needs to live in 
+    the environment so the 
+    """
+    if refresh: 
+        deploy_demo(token) 
 
 def readable_file(path):
     """Test for a readable file"""
@@ -45,7 +100,7 @@ def router():
     @NOTE: Argparsing with help from chatgpt: https://chatgpt.com/share/685ee2c0-76c8-8013-abae-304aa04b0eb1
     """
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser("Forklift CLI")
 
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
@@ -67,9 +122,9 @@ def router():
 
     # Deploy mode 
     deploy_parser = subparsers.add_parser("deploy")
-    deploy_parser.add_argument("--token", help="Token to use to authenticate to HF spaces")
     deploy_parser.add_argument("--model", type=readable_file, help="Directory to load model from")
     deploy_parser.add_argument("--type", choices=['naive', 'classic', 'neural'], default='neural')
+    deploy_parser.add_argument("--refresh",  action="store_true", help="Whether or not to refresh the server code prior to deployment.", default=False)
     
     args = parser.parse_args()
     
@@ -94,8 +149,11 @@ def router():
                 slm.test(args.dataset)
 
         case "deploy":
-            deploy(args.model, args.token)
-
+            token = os.environ.get("HF_TOKEN")
+            if token: 
+                deploy(args.model, token, args.refresh)
+            else: 
+                print("HF_TOKEN environment variable not set, please manually export or 'run huggingface-cli login'.")
         case _:
             parser.print_help()
 
