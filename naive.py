@@ -1,11 +1,9 @@
-import cv2
 import os
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator 
 import matplotlib.pyplot as plt
 import pickle
-import image_dataset
 
 class NaiveEstimator(BaseEstimator): 
 
@@ -71,3 +69,10 @@ def load_model(path):
         raise ValueError(f"Unexpected type {type(model)} found in {filename}")
 
     return model
+
+
+def train(dataset, dir): 
+    pass
+
+def test(dataset):
+    pass

@@ -4,13 +4,22 @@ Lift your understanding of any repo! 📦⬆
 
 ## TODO 
 
+- build a basic pipeline driven from the CLI that allows 
+  - synthesizing datasets (code directory -> dataset), 
+  - training (dataset -> model), 
+  - testing (dataset->scores), 
+  - deploying (model->URL out) 
 - explore transformers fine-tuning support
+- understand whether RL can use the same dataset if we use something like BLEU to compare results... 
 - find a model we can reasonably iterate on with our available compute (work rig)
 - generate a dataset through iterative decomposition of some thing, if not a codebase
+- 
 
 ## Problem 
 
-It is common for software engineers and information technology practitioners to encounter unfamiliar codebases. These individuals may be asked to troubleshoot, refactor, or reason about the underlying capabilities or limitations. Approaching these tasks without a working knowledge of the codebase risks inducing unintended behavior or incorrectly assessing the scope of work. However developing a working knowledge of a large codebase is a daunting task. Seasoned software engineers can take years to master a large codebase. It is desirable to augment a human practitioner in all of these tasks to mitigate the aforementioned risks and accelerate the acquisition of working knowledge. Large language models (LLMs) have displayed an exceptional ability to summarize, annotate, generalize and reason about source code. A suitably proficient model can serve as a human 'copilot', supporting analysis, summarization and general knowledge reinforcement. However, models are limited by the data and latent patterns provided during training. Codebases that were only superficially represented or absent entirely during the training phase present a problem when recruited into this copilot role. 
+It is common for software engineers and information technology practitioners to encounter unfamiliar codebases. These individuals may be asked to troubleshoot, refactor, or reason about the underlying capabilities or limitations. Approaching these tasks without a working knowledge of the codebase risks inducing unintended behavior or incorrectly assessing the scope of work. However, developing a working knowledge of a large codebase is a daunting task. Seasoned software engineers can take years to master a large software project. 
+
+It is desirable to augment a human practitioner in all of these tasks to mitigate the aforementioned risks and accelerate the acquisition of working knowledge. Large language models (LLMs) have displayed an exceptional ability to summarize, annotate, generalize and reason about source code. A suitably proficient model can serve as a human 'copilot', supporting analysis, summarization and general knowledge reinforcement. However, models are limited by the data and latent patterns provided during training. Codebases that were only superficially represented or absent entirely during the training phase present a problem when recruited into this copilot role. 
 - Model generates convincing language, and confidently recommends incorrect approaches based on the lack of underlying knowledge to support analysis 
 - Models are extremely prone to hallucinating symbols, programming interfaces and patterns in codebases that didn't present a strong signal during training
 - "prompt stuffing" or more sophisticated few-shot learning techqniues (e.g. retrieval-augmented generation - RAG), can improve results, but typically manifests as shallow knowledge
@@ -47,12 +56,31 @@ As outlined in [3], SFT and RL have different outcomes on model behavior. The fo
 
 ## Model Evaluation and Selection 
 
+Contemporary language models based on neural networks (NN) display  emergent natural language fluency and reasoning abilities that dramatically outstrip their naive and classical machine-learning counterparts. However, to establish a baseline, and hedge against total model collapse during fine-tuning, results are also reported for 
+
+- Hidden Markov Model 
+
+### SFT Suitability 
+
+In testing, SFT on Meta's OPT-350, a 350-million parameter language model, for 3 epochs of 25,000 training examples each had the following characteristics: 
+- 100% GPU utilization throughout 
+-  13GB VRAM usage thoughout
+- 2 CPU cores partially utilized
+- 13 minutes per epoch for a total run-time of 40 minutes
+
+### RL Suitability 
+
+A critical 
+
+In [4], a 14-billion parameter code-specific models is the target of a reinforcement learning campaign supported by 24K high-quality coding challenge examples. The reward signal came from associated unit-tests that validated problem solutions. 
 
 ### Data Processing Pipeline 
 
+
 **Repository Decomposition** 
 
-1. Ctags : Generates an index of symbols
+1. Ctags : Generates an index of symbols for the target repository
+   - Example invocation: `ctags -R --output-format=json --fields=+nksSaf --extras=+q -o linux_kernel.ctags ../../../linux/kernel/` will extract all symbols (even anonymous or implicit ones), enrich with some supplemental information and dump to disk at the file indicated by `-o`. 
 
 **Superfised Fine-Tuning (SFT)**
 1. Recursively decompose our target codebase to appreciate various *facets* that we can generate prompt pairs for by recruiting a foundation model (here GPT4.1 mini)
@@ -90,14 +118,20 @@ All testing done with Python 3.12
 
 1. `pip install -r requirements.txt` 
 
+## Usage 
+
+`forklift 
+`--build`
+`--train`
+`--test`
+`--deploy`
+
 ## Demo Application
 
 The [demo](./demo) directory contains a Gradio app compatible with HuggingFace Spaces. This repository is manually mirrored to a HuggingFace repository which auto-deploys any changes to the hosted virtual environment. The resulting application can be found here: https://huggingface.co/spaces/3emaphor/forklift
 
 ## Results and Conclusions
 
-- Fine-tuning 
-  - looks 13GB VRAM, a couple of partially occupied CPU cores, 100% GPU utilization and 40 minutes to run 9000 epochs 
 
 ## Ethics Statement
 
@@ -106,3 +140,4 @@ The [demo](./demo) directory contains a Gradio app compatible with HuggingFace S
 1. Fine-tuning 20B LLMs with RLHF on a 24GB consumer GPU, https://huggingface.co/blog/trl-peft
 2. Patil, R.; Gudivada, V. A Review of Current Trends, Techniques, and Challenges in Large Language Models (LLMs). Appl. Sci. 2024, 14, 2074. https://doi.org/10.3390/app14052074
 3. Chu et al, "SFT Memorizes, RL Generalizes: A comparitive Study of Foundation Model Post-training", 42nd ICML, 2025 https://arxiv.org/pdf/2501.17161
+4. Together.ai, DeepCoder: A Fully Open-Source 14B Coder at O3-mini Level, https://www.together.ai/blog/deepcoder?utm_source=chatgpt.com
