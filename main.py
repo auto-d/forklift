@@ -3,27 +3,12 @@ import os
 import naive
 import hmm 
 import slm 
-import subprocess
 import tempfile
 import glob
 import transformers
+import dataset
+from process import run_subprocess
 
-def build(): 
-    pass
-
-def run_subprocess(cmd, output=False): 
-    """
-    Shell out to run a provided command.
-
-    NOTE: assist from chatgpt on syntax: https://chatgpt.com/share/685ef572-0b24-8013-99df-fab2155c6e80
-    """
-    try:
-        result = subprocess.run(cmd,text=True, capture_output=output)
-        return True, result.stdout
-        
-    except subprocess.CalledProcessError as e:
-        return False, e.stderr
-        
 def deploy_demo(token): 
     """
     Deploy a model to HuggingFace Spaces, optionally refreshing the code in the 
@@ -100,7 +85,7 @@ def router():
     @NOTE: Argparsing with help from chatgpt: https://chatgpt.com/share/685ee2c0-76c8-8013-abae-304aa04b0eb1
     """
 
-    parser = argparse.ArgumentParser("Forklift CLI")
+    parser = argparse.ArgumentParser("forklift", description="Code repository data synthesis and LLM fine-tuning")
 
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
@@ -130,7 +115,7 @@ def router():
     
     match args.mode:     
         case "build":
-            build(args.inputs, args.dataset)
+            dataset.build(args.inputs, args.dataset)
 
         case "train":
             if args.type == 'naive':
