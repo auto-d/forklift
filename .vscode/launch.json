@@ -34,8 +34,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal", 
-            "env": { "HF_TOKEN": "${env:HF_TOKEN}" },
-            "args": ["deploy","--token","${env:HF_TOKEN}","--model", "./models.base.xyz"]
+            "args": ["deploy","--model", "./models.base.xyz", "--refresh"]
         }
 
     ]
