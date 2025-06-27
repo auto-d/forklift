@@ -5,7 +5,6 @@ import hmm
 import slm 
 import tempfile
 import glob
-import transformers
 import dataset
 from process import run_subprocess
 
@@ -20,24 +19,20 @@ def deploy_demo(token):
     spaces_https_url = "https://huggingface.co/spaces/3emaphor/forklift"
     spaces_git_url = "git@hf.co:spaces/3emaphor/forklift"
 
-    try:        
-        with tempfile.TemporaryDirectory() as tmp: 
+    with tempfile.TemporaryDirectory() as tmp: 
 
-            print("Attempting to push ./demo/* to {spaces_git_url}...")
-            cmds = []
-            cmds.append(["git", "clone", spaces_git_url, tmp]) 
-            cmds.append(["cp"] + glob.glob("./demo/*") + [tmp])
-            cmds.append(["git", "-C", tmp, "add", "."])
-            cmds.append(["git", "-C", tmp, "commit", "-m", "automated deploy"])
-            cmds.append(["git", "-C", tmp, "push"])
-            
-            for cmd in cmds: 
-                result, text = run_subprocess(cmd) 
-
-            print("Completed! {spaces_https_url} should be redeploying ... now. ")
+        print("Attempting to push ./demo/* to {spaces_git_url}...")
+        cmds = []
+        cmds.append(["git", "clone", spaces_git_url, tmp]) 
+        cmds.append(["cp"] + glob.glob("./demo/*") + [tmp])
+        cmds.append(["git", "-C", tmp, "add", "."])
+        cmds.append(["git", "-C", tmp, "commit", "-m", "automated deploy"])
+        cmds.append(["git", "-C", tmp, "push"])
         
-    except subprocess.CalledProcessError as e:
-        return False, e.stderr
+        for cmd in cmds: 
+            result, text = run_subprocess(cmd) 
+
+        print("Completed! {spaces_https_url} should be redeploying ... now. ")
         
     return result, text
 
