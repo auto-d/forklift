@@ -45,6 +45,23 @@ def deploy(token, model, refresh=False):
     if refresh: 
         deploy_demo(token) 
 
+def load_secrets(): 
+    """
+    Find our secrets and return them
+    """
+            
+    hf_token = os.environ.get("HF_TOKEN")
+    if not hf_token: 
+        with open("secrets/huggingface.token", "r") as file: 
+            hf_token = file.read()
+    
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if not openai_key: 
+        with open("secrets/openai.key", "r") as file: 
+            openai_key = file.read() 
+    
+    return hf_token, openai_key 
+
 def readable_file(path):
     """Test for a readable file"""
     if os.path.exists(path):
@@ -108,9 +125,13 @@ def router():
     
     args = parser.parse_args()
     
+    hf_token, openai_key = load_secrets()
     match args.mode:     
         case "build":
-            dataset.build(args.inputs, args.dataset)
+            if openai_key: 
+                dataset.build(args.inputs, openai_key, args.dataset)
+            else: 
+                print("No OpenAI API key found!")
 
         case "train":
             if args.type == 'naive':
@@ -128,12 +149,11 @@ def router():
             if args.type == 'neural': 
                 slm.test(args.dataset)
 
-        case "deploy":
-            token = os.environ.get("HF_TOKEN")
-            if token: 
-                deploy(args.model, token, args.refresh)
+        case "deploy":            
+            if hf_token: 
+                deploy(args.model, hf_token, args.refresh)
             else: 
-                print("HF_TOKEN environment variable not set, please manually export or 'run huggingface-cli login'.")
+                print("No huggingface token found!")
         case _:
             parser.print_help()
 
