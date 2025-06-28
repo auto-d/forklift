@@ -1,22 +1,17 @@
 # ForkLift
 
-Lift your understanding of any repo! 📦⬆ 
+Lift your understanding of any repo! 📦⬆
 
 ## TODO 
 
-- build a basic pipeline driven from the CLI that allows 
-  - synthesizing datasets (code directory -> dataset), 
-  - training (dataset -> model), 
-  - testing (dataset->scores), 
-  - deploying (model->URL out) 
-- explore transformers fine-tuning support
-- find tensorboard traces asociated with model training
-  - ensure we can see both training and validation loss
 - write an iterative decomposition and dataset building tool 
   - we have ctags symbols and probably all the cscope references we want .. function that called, function that will be called, etc..
     - how do we join the ctags defs with the cscope refs ? 
       - run a subprocess query for every symbol that ctags gave us, then join that information to the original symbol? 
       - we don't necesarily need to have a unified graph or super data matrix thing here -- the goal is thoughtful Q&A pairs
+- explore transformers fine-tuning support
+- find tensorboard traces asociated with model training
+  - ensure we can see both training and validation loss
 - decide on evaluation strategy ... 
   - how is this not just 1) build a dataset 2) hold out some data 3) use the same scalar we use to power the RL function ... i.e. evaluation is just a measure of similarity between desired output and actual ... 
     - BLEU is a problem, way too sensitive to evaluate the distanace between expected and provided output
