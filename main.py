@@ -104,11 +104,11 @@ def router():
     # Build mode 
     build_parser = subparsers.add_parser("build") 
     build_parser.add_argument("--inputs", nargs="+", type=readable_dir, help="List of code directories to target", required=True)
-    build_parser.add_argument("--dataset", type=readable_dir, help="Directory to write resulting dataset to", required=True)
+    build_parser.add_argument("--dataset", type=nonexistent_file, help="Directory to write resulting dataset to", required=True)
 
     # Train mode 
     train_parser = subparsers.add_parser("train") 
-    train_parser.add_argument("--dataset", type=readable_dir, help="Directory containing input dataset to train on ", required=True)
+    train_parser.add_argument("--dataset", type=readable_file, help="Directory containing input dataset to train on ", required=True)
     train_parser.add_argument("--model", type=nonexistent_file, help="File to write resulting models to (each will get a different suffix)", required=True)
     train_parser.add_argument("--type", choices=['naive', 'classic', 'neural'], default='neural')
 
@@ -129,7 +129,8 @@ def router():
     match args.mode:     
         case "build":
             if openai_key: 
-                dataset.build(args.inputs, openai_key, args.dataset)
+                paths = args.inputs if type(args.inputs) == list else [args.inputs]
+                dataset.build(paths, openai_key, args.dataset)
             else: 
                 print("No OpenAI API key found!")
 

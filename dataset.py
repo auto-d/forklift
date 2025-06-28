@@ -1,3 +1,4 @@
+import os
 import asyncio 
 import tempfile 
 import json 
@@ -19,41 +20,49 @@ def extract_symbol_defs(input_dir):
 
     symbols = None 
 
-    with tempfile.NamedTemporaryFile() as tmp_file: 
-        cmd = [
-            'ctags',
-            # Recursively process contents
-            '-R',                    
-            # Emit JSON (ensure this is compiled in if you are doing a manual ctags setup)
-            '--output-format=json', 
-            # Line number, kind/type, scope, signature/args, access, file scope
-            '--fields=+nksSaf', 
-            # Ensure scoping information is included
-            '--extras=+q',
-            # Write out pile of json to this file
-            '-o', tmp_file, 
-            # Dir full of stuff for ctags to work on... 
-            input_dir
-            ]
+    print(f"Extracting symbols from {input_dir}..")
 
-        result, _ = run_subprocess(cmd)
+    ctags_file = tempfile.mkstemp()[1]
+    cmd = [
+        'ctags',
+        # Recursively process contents
+        '-R',                    
+        # Emit JSON (ensure this is compiled in if you are doing a manual ctags setup)
+        '--output-format=json', 
+        # Line number, kind/type, scope, signature/args, access, file scope
+        '--fields=+nksSaf', 
+        # Ensure scoping information is included
+        '--extras=+q',
+        # Write out pile of json to this file
+        '-o', ctags_file, 
+        # Dir full of stuff for ctags to work on... 
+        input_dir
+        ]
 
-        # Weirdly the ctags json output is invalid as a document, but valid within each line... 
-        # maybe an efficiency thing. Anyway, parse each document separately as as dict to 
-        # streamline the ingest into a dataframe
-        data = []
-        with open(tmp_file, "r") as tag_file: 
-            for line in tag_file: 
-                data.append(json.loads(line))
+    result, _ = run_subprocess(cmd)
 
-        symbols = pd.DataFrame(data)
+    # Weirdly the ctags json output is invalid as a document, but valid within each line... 
+    # maybe an efficiency thing. Anyway, parse each document separately as as dict to 
+    # streamline the ingest into a dataframe
+    data = []
+    with open(ctags_file, "r") as tag_file: 
+        for line in tag_file: 
+            data.append(json.loads(line))
+
+    os.remove(ctags_file)
+
+    symbols = pd.DataFrame(data)
 
     # I'm sure there's a good use for ptags, but it's not jumping out at me on day one... for 
     # now leave them behind
     drop = symbols[symbols._type != 'tag'].index
-    return symbols.drop(drop, inplace=True)
+    symbols.drop(drop, inplace=True)
 
-def extract_symbol_refs(input_dir): 
+    print (f"Extracted {len(symbols)} definitions.")
+    
+    return symbols
+
+def extract_symbol_refs(symbol, input_dir): 
     """
     Recursively analyze a directory full of C/C++ source and extract all symbol references
 
@@ -65,24 +74,49 @@ def extract_symbol_refs(input_dir):
     
     """
 
-    # cscope wants a newline-separate list of files, oblige
+    print (f"Extracting symbol references for {symbol}...")
+    
+    # TODO: hide this behind a class so we can stash things like the target
+    # directory and avoid multiple invocations here (even though these are 
+    # probably not that expensive after the first call)
+
+    cscope_listing_file = tempfile.mkstemp()[1]
+
+    # cscope wants a newline-separate list of files, oblige 
+    print("Gathering input files...")
     cmd = [
         'find',
-        '.',
         input_dir,
         '-name',
-        '"*.c"',   
+        '*.c',   
         '-o', 
         '-name',
-        '"*.h"',
+        '*.h',
         '-o', 
         '-name', 
-        '"*.cpp"', 
+        '*.cpp', 
         '-o', 
         '-name',
-        '"*.hpp"']
-    
-    result, _ = run_subprocess(cmd )
+        '*.hpp', 
+        ]
+    result, files = run_subprocess(cmd, output_file=cscope_listing_file)
+
+    # Now build the indices for all associated definitions    
+    print("Preparing cscope indices... ")
+    cmd = [
+        'cscope', 
+        # Build listing only 
+        '-b',
+        # Ignore /usr/include aka 'kernel' mode
+        '-k', 
+        # "Quick" index build
+        '-q',
+        # Recursive 
+        '-R',
+        # Build index on these files
+        '-i', f'{cscope_listing_file}'
+        ]
+    run_subprocess(cmd)
 
     # We should now have a pair of indices, one for forward and one for reverse lookups... or
     # something like that. Looks like we can convince (maybe?) cscope to emit lines of the 
@@ -96,19 +130,25 @@ def extract_symbol_refs(input_dir):
     #
     # The above syntax "-L -<int>" is a cue to cscope to apply the function of the same index in the 
     # editor menu, here's the mapping (which can apparently vary between versions, yikes)
-    FIND_SYMBOL       = 0 # Find this C symbol: 
-    FIND_DEF          = 1 # Find this global definition:
-    FIND_CHILD_FN     = 2 # Find functions called by this function:
-    FIND_PARENT_FN    = 3 # Find functions calling this function:
-    FIND_TEXT         = 4 # Find this text string:
-    CHANGE_TEXT       = 5 # Change this text string:
-    FIND_PATTERN      = 6 # Find this egrep pattern:
-    FIND_FILE         = 7 # Find this file:
-    FIND_INCLUDES     = 8 # Find files #including this file:
-    FIND_ASSIGNMENTS  = 9 # Find assignments to this symbol:
+    FIND_SYMBOL       = "-0" # Find this C symbol: 
+    FIND_DEF          = "-1" # Find this global definition:
+    FIND_CHILD_FN     = "-2" # Find functions called by this function:
+    FIND_PARENT_FN    = "-3" # Find functions calling this function:
+    FIND_TEXT         = "-4" # Find this text string:
+    CHANGE_TEXT       = "-5" # Change this text string:
+    FIND_PATTERN      = "-6" # Find this egrep pattern:
+    FIND_FILE         = "-7" # Find this file:
+    FIND_INCLUDES     = "-8" # Find files #including this file:
+    FIND_ASSIGNMENTS  = "-9" # Find assignments to this symbol:
     #
     # We could conceivable build a pretty awesome graph with just this information, 
     # though are we just working overtime to produce an AST-like structure? 
+
+    #TODO: iterate over all symbols discovered previously? or have cscope just extract all? 
+    _, text = run_subprocess(["cscope", "-k", "-dL", FIND_SYMBOL, symbol], output=True)
+
+    #print (f"Extracted {len(symbols)} definitions.")
+    return text
     
 def build_symbol_map(defs, refs):
     """
@@ -144,14 +184,16 @@ def build(input_dirs, openai_key, output_dir):
     dataset directory
     """
     
-    if type(input_dirs) != list or  len(input_dirs == 0): 
+    if type(input_dirs) != list or  len(input_dirs) == 0: 
         raise ValueError("Expecting non-empty directory list!")
     
     for input_dir in input_dirs: 
 
         symbols = extract_symbol_defs(input_dir)
-        for row in symbols.iterrows(): 
-            print(row.name)
+        for index, row in symbols.iterrows(): 
+            refs = extract_symbol_refs(symbol=row['name'], input_dir=input_dir)
+            if refs and len(refs)>0: 
+                print(refs)
 
 def load_dataset(path): 
     """
