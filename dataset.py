@@ -1,6 +1,8 @@
+import asyncio 
 import tempfile 
 import json 
 import pandas as pd
+from openai import OpenAI
 from process import run_subprocess
 
 def extract_symbol_defs(input_dir): 
@@ -108,8 +110,6 @@ def extract_symbol_refs(input_dir):
     # We could conceivable build a pretty awesome graph with just this information, 
     # though are we just working overtime to produce an AST-like structure? 
     
-
-
 def build_symbol_map(defs, refs):
     """
     Given all symbol definitions and all symbol references, build a map of sorts to 
@@ -117,10 +117,28 @@ def build_symbol_map(defs, refs):
     """ 
     pass
 
+async def run_openai_completion(message, model="gpt-4.1-mini", api_key=None):
+    """
+    Push a chat completion request out to the void and collect the response ... we really need 
+    to be able to run these in parallel given the volume of queries we have
+
+    NOTE: with help from https://platform.openai.com/docs/guides/text?api-mode=chat&lang=python
+    """
+    
+    client = OpenAI()
+
+    completion = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user","content": message}]
+    )
+
+    response = completion.choices[0].message.content
+    return response
+
 def build_prompt(): 
     pass
 
-def build(input_dirs, output_dir): 
+def build(input_dirs, openai_key, output_dir): 
     """
     Given a list of directories, build a fine-tuning dataset and emit to the provided
     dataset directory
@@ -134,3 +152,17 @@ def build(input_dirs, output_dir):
         symbols = extract_symbol_defs(input_dir)
         for row in symbols.iterrows(): 
             print(row.name)
+
+def load_dataset(path): 
+    """
+    Read our dataset from a file and return it
+    """
+    dataset = pd.read_parquet(path=path)
+    return dataset 
+
+def save_dataset(dataset, path): 
+    """
+    Write our dataset out to a file
+    """
+    if type(dataset) == pd.DataFrame: 
+        dataset.to_parquet(path=path, index=True)
