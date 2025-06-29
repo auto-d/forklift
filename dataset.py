@@ -3,6 +3,7 @@ import asyncio
 import tempfile 
 import json 
 import pandas as pd
+import time 
 from openai import OpenAI
 from process import run_subprocess
 
@@ -21,14 +22,20 @@ class CodebaseAnalyzer():
     CSCOPE_FIND_INCLUDES     = "-8" # Find files #including this file:
     CSCOPE_FIND_ASSIGNMENTS  = "-9" # Find assignments to this symbol:
     
-    def __init__(self, input_dir, api_key): 
+    def __init__(self, input_dir, api_key=None): 
         """
-        Create a new object scoped to the code in the provided input directory 
+        Create a new object scoped to the code in the provided input directory. Pass an OpenAI
+        API key to hit open AI models, none to try Ollama locally
         """
         self.input_dir = input_dir
         self.defs = None
         self.cscope_indexed = False
-        self.client = OpenAI(api_key=api_key)
+        if api_key: 
+            self.client = OpenAI(api_key=api_key)
+            self.default_model = "gpt-4.1-nano"
+        else: 
+            self.client = OpenAI(api_key="none", base_url="http://localhost:11434/v1")
+            self.default_model = "llama3.1:8b"
 
     def extract_symbol_defs(self, refresh=False): 
         """
@@ -87,6 +94,10 @@ class CodebaseAnalyzer():
         drop = self.defs[self.defs._type != 'tag'].index
         self.defs.drop(drop, inplace=True)
 
+        # Convert lines to ints and paste empty strings over the NaNs
+        self.defs['line'] = self.defs['line'].fillna(0).astype(int)
+        self.defs.fillna('', inplace=True)
+
         print (f"Extracted {len(self.defs)} definitions.")
 
     def parse_cscope_lines(self, lines): 
@@ -95,15 +106,24 @@ class CodebaseAnalyzer():
         return a dict with same info. 
         """
         line_dicts = []
-        for line in lines: 
+        if not lines or len(lines) == 0: 
+            return []
+        
+        for line in lines.split('\n'): 
             line_dict = {}
             
+            if line == '': 
+                continue
+                
             fields = line.split(' ')
-            line_dict['file'] = fields[0]
-            line_dict['symbol'] = fields[1]
-            line_dict['line'] = fields[2]
-            line_dict['text'] = fields[3:]
-            
+            if len(fields) >= 4: 
+                line_dict['file'] = fields[0]
+                line_dict['symbol'] = fields[1]
+                line_dict['line'] = fields[2]
+                line_dict['text'] = ''.join(fields[3:])
+            else: 
+                raise ValueError("Can't unpack all fields in cscope output!")
+        
             line_dicts.append(line_dict)
 
         return line_dicts
@@ -112,9 +132,9 @@ class CodebaseAnalyzer():
         """
         Print a dict returned by parse_cscope_lines into a legible structure 
         """
-        s = "file,symbol,line,text" 
+        s = "" 
         for dict_ in dicts: 
-            s+= f"{dict_['file']},{dict_['symbol']},{dict_['line']},{dict_['text']}"
+            s+= f"file:{dict_['file']}\nsymbol:{dict_['symbol']}\nline:{dict_['line']}\ncode:{dict_['text']}"
 
         return s
 
@@ -190,11 +210,21 @@ class CodebaseAnalyzer():
         #TODO: iterate over all symbols discovered previously? or have cscope just extract all?         
         result = {}
         result['symbol'] = symbol
-        _, result['refs'] = self.parse_cscope_lines(run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_SYMBOL, symbol], output=True))
-        _, result['defs'] = self.parse_cscope_lines(run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_DEF, symbol], output=True))
-        _, result['children'] = self.parse_cscope_lines(run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_CHILD_FN, symbol], output=True))
-        _, result['parents'] = self.parse_cscope_lines(run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_PARENT_FN, symbol], output=True))
-        _, result['asnmts'] = self.parse_cscope_lines(run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_ASSIGNMENTS, symbol], output=True))
+        
+        _, text = run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_SYMBOL, symbol], output=True)
+        result['refs'] = self.parse_cscope_lines(text)
+
+        _, text = run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_DEF, symbol], output=True)
+        result['defs'] = self.parse_cscope_lines(text) 
+
+        _, text = run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_CHILD_FN, symbol], output=True)
+        result['children'] = self.parse_cscope_lines(text) 
+
+        _, text = run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_PARENT_FN, symbol], output=True)
+        result['parents'] = self.parse_cscope_lines(text) 
+
+        _, text = run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_ASSIGNMENTS, symbol], output=True)
+        result['asnmts'] = self.parse_cscope_lines(text) 
 
         #print (f"Extracted {len(symbols)} definitions.")
         return {} if result['refs'] == '' else result
@@ -213,7 +243,7 @@ class CodebaseAnalyzer():
         """ 
         pass
 
-    def complete(self, message, context=None, system=None, temperature=0.5, model="gpt-4.1-nano"):
+    def complete(self, message, context=None, system=None, temperature=0.5, model=None):
         """
         Push a chat completion request out to the void and collect the response ... we really need 
         to be able to run these in parallel given the volume of queries we have
@@ -221,27 +251,37 @@ class CodebaseAnalyzer():
         NOTE: with help from https://platform.openai.com/docs/guides/text?api-mode=chat&lang=python
         """
 
+        start = time.time()
+
         messages = []
         if system: 
             messages.append({ "role": "system", "content": system })
         if context: 
-            messages.append({ "role": "user", "content": context })
+            messages.append({ "role": "user", "content": f"source search results:\n{context}" })
         messages.append({ "role": "user","content": message })
 
-        completion = client.chat.completions.create(
-            model=model,
-            messages=messages
-            "temperature" : temperature
+        completion = self.client.chat.completions.create(
+            model=model if model else self.default_model,
+            messages=messages,
+            temperature=temperature
         )
 
         response = completion.choices[0].message.content
+
+        in_tokens = completion.usage.prompt_tokens
+        out_tokens = completion.usage.completion_tokens
+        
+        print(f" Sent {in_tokens} tokens to {model}, received {out_tokens} tokens after {time.time() - start:.3}s")
+        
         return response
 
-    def embellish_prompt(self, x, context)
+    def embellish_prompt(self, x, context):
         """
         Given a prompt about the codebase we're analyzing, and some hopefully useful
         context, permute a few different variations and harness a foundation model 
         to build reasonable input/outputs to support SFT and DPO... return
+        - x0: the motivating question/prompt (not intended to be used for training 
+          but useful for comparison to generated sequences)
         - x: the question/prompt (SFT input sequence)
         - y: an authoritative answer (SFT target sequence)
         - x2: another framing of the question (DPO input sequence)
@@ -256,25 +296,27 @@ class CodebaseAnalyzer():
         yu_system = "You are a Linux kernel specialist. Your responses should be CONCISE."
 
         # TODO: move to asyncio and refactor this to run the completions concurrently
-        set_ = {}
-        set_['x'] = x 
+        set_ = {}        
 
         # Generate a completion, giving the SFT and DPO+ response the advantage of a 
         # better system prompt, lower temperature (hypothesize that creativity=bad in 
         # code Q&A) and context to enrich the response... 
-        set_['y'] = complete(x, system=y_system, context=context, temperature=0.3)
-        set_['yp'] = complete(x, system=yp_system, context=context, temperature=0.3)
-        set_['yu'] = complete(x, system=yu_system, temperature=0.7)
+        set_['y'] = self.complete(x, system=y_system, context=context, temperature=0.3)
+        set_['yp'] = self.complete(x, system=yp_system, context=context, temperature=0.3)
+        set_['yu'] = self.complete(x, system=yu_system, temperature=0.7)
 
-        # Generate a plausible question/prompt that induced the above completion, the 
-        # variation here will be essential in DPO departing from the somewhat clinical 
-        # prompts that will be used in SFT to memorize some of the new information
-        bwd_prompt = f"We are building a Q&A dataset. Write a question about the Linux kernel that the following would be an appropriate answer to. Answer ONLY with the question or prompt.\n----\n{set_['y']}"
-        set_['x2'] = complete(bwd_prompt, system=y_system, context=context, temperature=0.3) 
+        # Generate a plausible question/prompt that induced the above completion to 
+        # replace our stiff and unimaginative initial prompt. The variation here creates 
+        # a much larger space of inputs to and will hopefully reduce overfit and retain 
+        # more realistic style of human interaction with the resulting model.
+        set_['x0'] = x
+        bwd_prompt = f"We are building a Q&A dataset. Write a question about the Linux kernel that the following text would be an appropriate answer to.\n----\n{set_['y']}\n----\nAnswer ONLY with the question or prompt."
+        set_['x'] = self.complete(bwd_prompt, system=y_system, context=context, temperature=0.3)  
+        set_['x2'] = self.complete(bwd_prompt, system=y_system, context=context, temperature=0.5) 
 
         return set_
 
-    def generate_symbol_prompts(self, def, refs): 
+    def generate_symbol_prompts(self, defn, refs): 
         """
         Given a symbol definition, and all references to it, apply a series of heuristics 
         that are an amalgamation of canned text, symbol citations, and LLM completions for 
@@ -371,13 +413,13 @@ class CodebaseAnalyzer():
                             these arrays can often be empty (no cscope match)
 
         """
-        prompt_sets = []
+        sets = []
         
-        symbol = def['symbol']
-        kind = def['kind']
-        path = def['path']
-        line = def['line']
-        sig = def['signature']
+        symbol = defn['name']
+        kind = defn['kind']
+        path = defn['path']
+        line = defn['line']
+        sig = defn['signature']
 
         # Volume of training data isn't going to be a problem, we can augment so many 
         # ways... temperature, weaker models, system prompt variation, etc... we really need 
@@ -454,7 +496,7 @@ class CodebaseAnalyzer():
         # What is the role of the syscall_table?
 
         # Symbols    
-        prompt_set += self.embellish_prompt(f"What file is {symbol} defined in?", context=f"{kind} {symbol}{sig}found in file:{path} @ line {line}.") 
+        sets.append(self.embellish_prompt(f"What file is {symbol} defined in?", context=f"{kind} {symbol} {sig} found in file:{path} @ line {line}.")) 
         #TODO: implement recursive summarzation block-> function-> file -> directory -> parent ... 
         #TODO: implement grepping for contextual lines beyond the single identified line here 
         #grep_context = retrieve_context(file, line, size=5)
@@ -473,62 +515,66 @@ class CodebaseAnalyzer():
         #prompt_set += self.embellish_prompt(f"Can {symbol} interact with user mode processes?", context=grep_context_all_refs) 
         #prompt_set += self.embellish_prompt(f"What APIs might be associated with {symbol}?", context=grep_context_all_refs) 
 
-        # Symbol References
-        ref_table = "definitions containing symbol {symbol}\n----\npath,scope,line,code"
+        # Symbol References        
         for ref in refs['refs']: 
             # TODO: ref-specific prompts
             pass 
 
-        prompt_set += self.embellish_prompt(f"Where is the {symbol} referenced?", context=self.print_cscope_dicts(refs['refs'])) 
+        sets.append(self.embellish_prompt(f"Where is the {symbol} referenced?", context=self.print_cscope_dicts(refs['refs']))) 
 
         # Symbol Definitions
-        for def in refs['defs']: 
+        for def_ in refs['defs']: 
             # TODO: definition-specific prompts            
             pass
     
-        prompt_set += self.embellish_prompt(f"Where else is the {symbol} defined?", context=self.print_cscope_dicts(refs['defs'])) 
+        sets.append(self.embellish_prompt(f"Where else is the {symbol} defined?", context=self.print_cscope_dicts(refs['defs']))) 
 
         # Functions called from associated function's scope (if any)
         for child in refs['children']:  
             # TODO: child-specific...           
             pass
 
-        prompt_set += self.embellish_prompt(f"What functions does {symbol} call?", context=self.print_cscope_dicts(refs['children'])) 
+        sets.append(self.embellish_prompt(f"What functions does {symbol} call?", context=self.print_cscope_dicts(refs['children']))) 
 
         # Functions that call the associated function symbol (if any)
-        for parent in refs['parent']:
+        for parent in refs['parents']:
             # TODO: parent specific prompts
             pass
 
-        prompt_set += self.embellish_prompt(f"What functions is {symbol} called by?", context=self.print_cscope_dicts(refs['parents']))
+        sets.append(self.embellish_prompt(f"What functions is {symbol} called by?", context=self.print_cscope_dicts(refs['parents'])))
                                                                                                                         
         # Assignment operations (if any)
         for asnmt in refs['asnmts']:       
             # TODO: assignment prompts..      
             pass
 
-        prompt_set += self.embellish_prompt(f"Where are assignments made to {symbol}?", context=self.print_cscope_dicts(refs['asnmts']))
+        sets.append(self.embellish_prompt(f"Where are assignments made to {symbol}?", context=self.print_cscope_dicts(refs['asnmts'])))
 
-        return prompt_set 
+        return sets 
 
     def generate_dataset(self): 
         """
         Generate prompts for all symbols in the provided input
         """
+        prompt_sets = []
+
         self.extract_symbol_defs()
         for index, def_ in self.defs.iterrows(): 
-            refs = self..extract_symbol_refs(symbol=def_['name'])
-            if refs != {}:
-                prompt_sets += self.generate_symbol_prompts(def_, refs)
+            
+            # Extract all refernces, assignments, etc... to this symbol and proceed 
+            # only if we've found one or more valid interactions w/ said symbol
+            refs = self.extract_symbol_refs(symbol=def_['name'])
+            if refs['refs']:
+                prompt_set = self.generate_symbol_prompts(def_, refs)
+                prompt_sets += prompt_set                
 
                 # TODO: write these to disk after every symbol to mitigate busted 
                 # runs and simplify joins (we just overwrite the file with the 
                 # same symbol name or skip if it's already there)
 
-                print('===ctags==============')
-                print(def_) 
-                print('---cscope-------------')
-                self.print_refs(refs)
+                print('=================')
+                print(def_['symbol']) 
+                print(prompt_set)
 
 def build(input_dirs, openai_key, output_dir): 
     """
@@ -568,7 +614,7 @@ def build(input_dirs, openai_key, output_dir):
     # we don't want some of the contained code/dirs included in this analysis. 
     for input_dir in input_dirs: 
 
-        analyzer = CodebaseAnalyzer(input_dir, openai_key)
+        analyzer = CodebaseAnalyzer(input_dir)
         prompt_sets += analyzer.generate_dataset() 
 
 def load_dataset(path): 

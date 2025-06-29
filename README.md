@@ -114,6 +114,18 @@ In [4], a 14-billion parameter code-specific models is the target of a reinforce
 
 1. Ctags : Generates an index of symbols for the target repository
    - Example invocation: `ctags -R --output-format=json --fields=+nksSaf --extras=+q -o linux_kernel.ctags ../../../linux/kernel/` will extract all symbols (even anonymous or implicit ones), enrich with some supplemental information and dump to disk at the file indicated by `-o`. 
+2. Cscope: Extracts rich symbol reference information
+   - a
+   - b
+3. Apply heuristics to generat
+   - Apply a series of heuristics to generate prompts and reference information to pass to an LLM for completion
+   - E.g. 
+     - prompt: 'What file is BUG defined in?'
+    - quality answer 1 (for SFT): 'The symbol `BUG` is defined in the `../../linux/init/Kconfig` file at line 1670.'
+    - quality answer 2 (preferred DPO answer)): 'BUG is defined in `../../linux/init/Kconfig`.'
+    - unpreferred answer (for DPO): 'The `BUG()` macro is defined in `<linux/bug.h>`.'
+    - reframing of the question to induce variance for SFT: 'x' ='Where is the `BUG` symbol defined in the Linux kernel configuration?'
+    - reframing of the qutestiont to induce variance for DPO: 'x2' ='Where is the `BUG` symbol defined in the Linux kernel source code?'
 
 **Superfised Fine-Tuning (SFT)**
 1. Recursively decompose our target codebase to appreciate various *facets* that we can generate prompt pairs for by recruiting a foundation model (here GPT4.1 mini)
@@ -171,6 +183,40 @@ The [demo](./demo) directory contains a Gradio app compatible with HuggingFace S
 
 ## Results and Conclusions
 
+### Challenges 
+
+- Foundational model latency and potential throttling ... 
+  - gpt-4.1-nano
+    ```
+    Sent 77 tokens to gpt-4.1-nano, received 61 tokens after 10.6s
+    Sent 71 tokens to gpt-4.1-nano, received 13 tokens after 0.902s
+    Sent 33 tokens to gpt-4.1-nano, received 13 tokens after 0.606s
+    Sent 167 tokens to gpt-4.1-nano, received 18 tokens after 20.7s
+    Sent 167 tokens to gpt-4.1-nano, received 18 tokens after 20.5s
+    Sent 80 tokens to gpt-4.1-nano, received 101 tokens after 21.2s
+    ```
+  - gpt-4.1-mini
+    ```
+    Sent 77 tokens to gpt-4.1-mini, received 41 tokens after 1.15s
+    Sent 71 tokens to gpt-4.1-mini, received 42 tokens after 0.936s
+    Sent 33 tokens to gpt-4.1-mini, received 20 tokens after 0.554s
+    Sent 147 tokens to gpt-4.1-mini, received 21 tokens after 20.9s
+    Sent 147 tokens to gpt-4.1-mini, received 20 tokens after 20.9s
+    Sent 80 tokens to gpt-4.1-mini, received 170 tokens after 23.4s
+    Sent 74 tokens to gpt-4.1-mini, received 164 tokens after 23.6s
+    Sent 32 tokens to gpt-4.1-mini, received 32 tokens after 21.0s
+    Sent 280 tokens to gpt-4.1-mini, received 23 tokens after 20.9s
+    Sent 280 tokens to gpt-4.1-mini, received 33 tokens after 20.9s
+    Sent 51 tokens to gpt-4.1-mini, received 192 tokens after 24.5s
+    Sent 45 tokens to gpt-4.1-mini, received 140 tokens after 22.7s
+    Sent 33 tokens to gpt-4.1-mini, received 62 tokens after 1.46s
+    Sent 272 tokens to gpt-4.1-mini, received 21 tokens after 21.1s
+    Sent 272 tokens to gpt-4.1-mini, received 21 tokens after 20.9s
+    Sent 50 tokens to gpt-4.1-mini, received 131 tokens after 22.6s
+    Sent 44 tokens to gpt-4.1-mini, received 97 tokens after 21.6s
+    Sent 32 tokens to gpt-4.1-mini, received 93 tokens after 21.6s
+    ```
+  
 
 ## Ethics Statement
 
