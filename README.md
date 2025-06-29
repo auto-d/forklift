@@ -5,10 +5,9 @@ Lift your understanding of any repo! 📦⬆
 ## TODO 
 
 - write an iterative decomposition and dataset building tool 
-  - we have ctags symbols and probably all the cscope references we want .. function that called, function that will be called, etc..
-    - how do we join the ctags defs with the cscope refs ? 
-      - run a subprocess query for every symbol that ctags gave us, then join that information to the original symbol? 
-      - we don't necesarily need to have a unified graph or super data matrix thing here -- the goal is thoughtful Q&A pairs
+      - tree-sitter and AST integration point? 
+    - alternative or in addition to: build a proper graph to drive DPO or validation? 
+    - change the ingest to record path as if we're in the root of the linux kernel repo ... at present the paths are misleading
 - explore transformers fine-tuning support
 - find tensorboard traces asociated with model training
   - ensure we can see both training and validation loss
@@ -54,6 +53,14 @@ In the above example, we can be charitable about the limitations of a 500-billio
 Depending on the nature of the code and it's complexity, and the degree to which it was available during training, the above issues can result in a significant gap betwween the promise of language models and their ultimate value in this context. Superfised fine tuning (SFT) and reinforcement learning (RL) methods provide an answer to this performance gap, however implementing these methods to improve LLM performance on codebase comprehension has not to the author's knowledge been advertised. A solution for improving LLM performance on specific codebases is proposed here accordingly. 
 
 ## Data Sources
+
+- The Linux kernel [5]
+- Latent knowledge and patterns as sourced during dataset synthesis from: 
+  - ChatGPT 4.1 Nano [6]
+  - Qwen 2.5 0.5B
+
+  
+###
 
 ## Prior Efforts 
 
@@ -167,9 +174,22 @@ The [demo](./demo) directory contains a Gradio app compatible with HuggingFace S
 
 ## Ethics Statement
 
+### Provenance
+
+**Data** 
+This project was developed as a proof-of-concept to aid the rapid uptake and ultimate mastery of complex software projects. The data used to construct the synthetic training sets was sourced entirely from the Linux open source software project [5] which is licensed under GPL2, and other permissive licenses. The author is not aware of any underlying 
+
+**Reproducability** 
+The code written in this project is the author's work, made possible by a host of righteous open source software packages, tools, and the Ubuntu Linux distribution. Code snippets sourced from articles, tutorials and large-language model chat sessions are annotated in the source code where appropriate. All results here should be reproducible freely, without any licensing implications. 
+
+**Harmful Content** 
+The synthetic datasets generated are based purely on Linux kernel symbols and their associated references. Source code and comments are ingeseted into the question datasets used for training. A thorough review of this material has not been conducted, and latent bias, offensive content, or malicious code may have been unintentionally incorporated into the resulting dataset accordingly. 
+
 ## References
 
 1. Fine-tuning 20B LLMs with RLHF on a 24GB consumer GPU, https://huggingface.co/blog/trl-peft
 2. Patil, R.; Gudivada, V. A Review of Current Trends, Techniques, and Challenges in Large Language Models (LLMs). Appl. Sci. 2024, 14, 2074. https://doi.org/10.3390/app14052074
 3. Chu et al, "SFT Memorizes, RL Generalizes: A comparitive Study of Foundation Model Post-training", 42nd ICML, 2025 https://arxiv.org/pdf/2501.17161
 4. Together.ai, DeepCoder: A Fully Open-Source 14B Coder at O3-mini Level, https://www.together.ai/blog/deepcoder?utm_source=chatgpt.com
+5. Torvalds, et al. (2025). Linux kernel (Version 6.16) [Computer software]. GitHub. https://github.com/torvalds/linux
+6. OpenAI. (2024). ChatGPT (June 26 Version) [Large language model]. https://chat.openai.com/
