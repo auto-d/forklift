@@ -455,11 +455,23 @@ class CodebaseAnalyzer():
 
         # Symbols    
         prompt_set += self.embellish_prompt(f"What file is {symbol} defined in?", context=f"{kind} {symbol}{sig}found in file:{path} @ line {line}.") 
+        #TODO: implement recursive summarzation block-> function-> file -> directory -> parent ... 
         #TODO: implement grepping for contextual lines beyond the single identified line here 
         #grep_context = retrieve_context(file, line, size=5)
         #prompt_set += self.embellish_prompt(f"What is the purpose of {symbol} ?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"What is the purpose of {symbol} ?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"What is the purpose of {symbol} ?", context=grep_context) 
+        #prompt_set += self.embellish_prompt(f"What roles does {symbol} have in the system?", context=grep_context) 
+        #prompt_set += self.embellish_prompt(f"How is {symbol} relevant to the system architecture?", context=grep_context) 
+        #prompt_set += self.embellish_prompt(f"How is the file {symbole} resides in organized ?", context=file-context) 
+        #prompt_set += self.embellish_prompt(f"What other files and symbols are important in {symbol}'s subsystem?", context=file-list_context) 
+        #prompt_set += self.embellish_prompt(f"What subsystem does {symbol} belong to?", context=grep_context) 
+        #prompt_set += self.embellish_prompt(f"Is memory being managed by {symbol}?", context=grep_context_all_refs) 
+        #prompt_set += self.embellish_prompt(f"What depenencies does {symbol} have?) 
+        #prompt_set += self.embellish_prompt(f"What happens if {symbol} is corrupted?", context=grep_context_all_refs) 
+        #prompt_set += self.embellish_prompt(f"Does {symbol} process network traffic?", context=grep_context_all_refs) 
+        #prompt_set += self.embellish_prompt(f"Is {symbol} associated with security policies?", context=grep_context_all_refs) 
+        #prompt_set += self.embellish_prompt(f"Does {symbol} assist with threading?", context=grep_context_all_refs) 
+        #prompt_set += self.embellish_prompt(f"Can {symbol} interact with user mode processes?", context=grep_context_all_refs) 
+        #prompt_set += self.embellish_prompt(f"What APIs might be associated with {symbol}?", context=grep_context_all_refs) 
 
         # Symbol References
         ref_table = "definitions containing symbol {symbol}\n----\npath,scope,line,code"
