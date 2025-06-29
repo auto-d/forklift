@@ -104,7 +104,7 @@ def router():
     # Build mode 
     build_parser = subparsers.add_parser("build") 
     build_parser.add_argument("--inputs", nargs="+", type=readable_dir, help="List of code directories to target", required=True)
-    build_parser.add_argument("--dataset", type=nonexistent_file, help="Directory to write resulting dataset to", required=True)
+    build_parser.add_argument("--dataset", help="Directory to write resulting dataset to", required=True)
 
     # Train mode 
     train_parser = subparsers.add_parser("train") 
