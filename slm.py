@@ -4,7 +4,18 @@ from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM
 
-def sft(dataset:Dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, epochs=1, path=None):
+def summarize_history(history): 
+    """
+    Mine some salient history 
+    """
+    df = pd.DataFrame(history) 
+    s = (f"***************************")
+    s += f"Completed {df.epoch.max():.4} epochs ({df.step.max()} steps)\n"
+    s += f" - Loss {df.loss.max():.3f} -> {df.loss.min():.3f}\n"
+    s += f" - Eval runtime: {df.eval_runtime.sum():.2f}s ({df.eval_runtime.mean():.2f}s/eval)\n"
+    return s
+    
+def sft(dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, epochs=1, path=None):
     """
     Initiate a supervised fine-tuning run on the target model
     """
@@ -15,7 +26,6 @@ def sft(dataset:Dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, 
     base = AutoModelForCausalLM.from_pretrained(model)
     tqdm.write("Loaded base model: " + base.__class__.__name__)
     tqdm.write("-------------------------------------------------")
-    tqdm.write(base)
 
     # TODO: investigate whether a change in precision is supportable here!
     # per https://huggingface.co/docs/trl/en/sft_trainer#control-over-the-pretrained-model
@@ -40,12 +50,14 @@ def sft(dataset:Dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, 
         # sequences to the max_length argument of the SFTConfig. If none is passed, 
         # the trainer will retrieve that value from the tokenizer. Some tokenizers 
         # do not provide a default value, so there is a check to retrieve the minimum
-        #  between 1024 and that value. Make sure to check it before  training.
-        max_length=512, 
+        # between 1024 and that value. Make sure to check it before training.
+        #max_length=512, 
         output_dir="runs", 
         num_train_epochs=epochs, 
         max_steps=max_steps, 
-        per_device_train_batch_size=batch_size
+        per_device_train_batch_size=batch_size,
+        eval_strategy="steps", 
+        report_to="tensorboard"
     )
     
     # TODO: consider recruiting unsloth here to reduce memory usage and accelerate training ... 
@@ -53,24 +65,25 @@ def sft(dataset:Dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, 
 
     trainer = SFTTrainer(
         base, 
-        train_dataset=dataset, 
-        # TODO: add a validation set here ... just split the input data or is there 
-        # a reason to ask for a separate dataset? The same split could be used across multiple
-        # training runs, which we'd want to leave to the client/caller
-        eval_dataset=None, 
-        args=config,
+        train_dataset=dataset['train'], 
+        eval_dataset=dataset['test'], 
+        args=config        
         ) 
 
     tqdm.write("Initiating training run.")
-    trainer.train()
+    try: 
+        trainer.train()
+        tqdm.write('Training complete!')
 
-    tqdm.write('Training complete!')
+        if path: 
+            tqdm.write(f'Writing model to {path}...')
+            trainer.save_model(path)
 
-    if path: 
-        tqdm.write(f'Writing model to {path}...')
-        trainer.save_model(path)
-
-    return trainer.model
+        return trainer.model, summarize_history(trainer.state.log_history)
+    
+    except KeyboardInterrupt as interrupt: 
+        tqdm.write("Aborting run due to keyboard interrupt!")
+        return None, summarize_history(trainer.state.log_history)
 
 def dpo(dataset:Dataset, model):
     """
@@ -120,22 +133,27 @@ def build_dpo_dataset(dataset):
 def train(dataset_path, model_path, steps=None, epochs=1): 
     """
     Train our derivitative model 
-    """
-    
+    """    
+    tqdm.write(f"Loading dataset {dataset_path}...")
     dataset = pd.read_parquet(dataset_path)
     sft_dataset = build_sft_dataset(dataset) 
 
-    # TODO manage the validation and data splits here or earlier to avoid 
-    # training data sneaking into validation sets (e.g. )
-    model = sft(dataset=sft_dataset, path=model_path, max_steps=steps, epochs=epochs)
-    
-    #TODO: add a sanity check to validate the model's
+    test_train_ratio = 0.1
+    tqdm.write(f"Holding {test_train_ratio}% out for validation...")    
+    sft_dataset = sft_dataset.train_test_split(test_size=test_train_ratio)
+
+    model, summary = sft(sft_dataset, path=model_path, max_steps=steps, epochs=epochs)    
+    tqdm.write(summary)
+
+    # TODO: add a sanity check to validate the model's sequence length and flag any 
+    # training data that will be truncated during training
     tqdm.write("Supervised fine-tuning complete!") 
 
-    dpo_dataset = build_dpo_dataset(dataset)
-    model = dpo(dataset=dpo_dataset, model=model)
+    if model != None: 
+        dpo_dataset = build_dpo_dataset(dataset)
+        model = dpo(dataset=dpo_dataset, model=model)
 
-    tqdm.write("DPO complete!") 
+        tqdm.write("DPO complete!") 
 
 def test(dataset):
     pass
