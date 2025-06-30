@@ -1,3 +1,6 @@
+test/*
+runs/* 
+secrets/* 
 models/* 
 data/* 
 

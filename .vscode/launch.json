@@ -8,33 +8,37 @@
             "name": "Python Debugger: Build",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "main.py",
             "console": "integratedTerminal", 
-            "args": ["build","--inputs","../../linux/init","--dataset","./data/linux_init"]
+            "args": ["build","--inputs","test/init","--dataset","./data/test"],
+            "justMyCode": false
         },
         {
             "name": "Python Debugger: Train",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "main.py",
             "console": "integratedTerminal", 
-            "args": ["train","--dataset","./data/linux_init","--model","./models/base.xyz"]
+            "args": ["train","--dataset","./data/test/init.parquet","--model","./models/test","--nn_steps","10"],
+            "justMyCode": false
         },
         {
             "name": "Python Debugger: Test",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "main.py",
             "console": "integratedTerminal", 
-            "args": ["test","--model","./models/base.xyz"]
+            "args": ["test","--model","./models/base.xyz"],
+            "justMyCode": false
         },
         {
             "name": "Python Debugger: Deploy",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "main.py",
             "console": "integratedTerminal", 
-            "args": ["deploy","--model", "./models.base.xyz", "--refresh"]
+            "args": ["deploy","--model", "./models.base.xyz", "--refresh"],
+            "justMyCode": false
         }
 
     ]
