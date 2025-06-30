@@ -185,6 +185,13 @@ class CodebaseAnalyzer():
             result, files = run_subprocess(cmd, output_file=cscope_listing_file)
 
             # Now build the indices for all associated definitions    
+            # NOTE: cscope is going to emit its indices in the working dir 
+            # dir, which will get steamrolled if we try to build another dataset 
+            # concurrently. Essentially the new index invalidates all of the planned 
+            # lookups for the job that created the overwritten indices. See this
+            # gpt-4o discussion regarding a symlink-based solution since cscope doesn't 
+            # allow changing the index locations (relative to CWD): 
+            # https://chatgpt.com/share/6862f22b-a42c-8013-af1f-6595d2aa648e
             tqdm.write("Preparing cscope indices... ")
             cmd = [
                 'cscope', 
