@@ -13,9 +13,9 @@ def sft(dataset:Dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, 
     # If you create a model outside the trainer, make sure not to pass to the trainer any 
     # additional keyword arguments that are relative to from_pretrained() method.
     base = AutoModelForCausalLM.from_pretrained(model)
-    print("Loaded base model: " + base.__class__.__name__)
-    print("-------------------------------------------------")
-    print(base)
+    tqdm.write("Loaded base model: " + base.__class__.__name__)
+    tqdm.write("-------------------------------------------------")
+    tqdm.write(base)
 
     # TODO: investigate whether a change in precision is supportable here!
     # per https://huggingface.co/docs/trl/en/sft_trainer#control-over-the-pretrained-model
@@ -61,13 +61,13 @@ def sft(dataset:Dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, 
         args=config,
         ) 
 
-    print("Initiating training run.")
+    tqdm.write("Initiating training run.")
     trainer.train()
 
-    print('Training complete!')
+    tqdm.write('Training complete!')
 
     if path: 
-        print(f'Writing model to {path}...')
+        tqdm.write(f'Writing model to {path}...')
         trainer.save_model(path)
 
     return trainer.model
@@ -88,13 +88,13 @@ def build_sft_dataset(dataset):
       {"prompt": "<prompt text>", "completion": "<ideal generated text>"}
 
     """    
-    print('Building SFT dataset...')
+    tqdm.write('Building SFT dataset...')
 
     copy = dataset.rename(columns={'x':'prompt','y':'completion'})
     copy.drop(['yp','yu','x0','x2'], axis=1, inplace=True)
     sft_dataset = Dataset.from_pandas(copy)
 
-    print(f"Done ({len(sft_dataset)} rows)!")
+    tqdm.write(f"Done ({len(sft_dataset)} rows)!")
 
     return sft_dataset
 
@@ -107,13 +107,13 @@ def build_dpo_dataset(dataset):
       {"prompt": "The sky is", "chosen": " blue", "rejected": " green"}
 
     """
-    print('Building DPO dataset...')
+    tqdm.write('Building DPO dataset...')
 
     copy = dataset.rename(columns={'x2':'prompt','yp':'chosen','yu':'rejected'})
     copy.drop(['x0','x', 'y'], axis=1, inplace=True)
     dpo_dataset = Dataset.from_pandas(copy)
     
-    print(f"Done ({len(dpo_dataset)} rows)!")
+    tqdm.write(f"Done ({len(dpo_dataset)} rows)!")
 
     return dpo_dataset
 
@@ -125,15 +125,17 @@ def train(dataset_path, model_path, steps=None, epochs=1):
     dataset = pd.read_parquet(dataset_path)
     sft_dataset = build_sft_dataset(dataset) 
 
+    # TODO manage the validation and data splits here or earlier to avoid 
+    # training data sneaking into validation sets (e.g. )
     model = sft(dataset=sft_dataset, path=model_path, max_steps=steps, epochs=epochs)
     
     #TODO: add a sanity check to validate the model's
-    print("Supervised fine-tuning complete!") 
+    tqdm.write("Supervised fine-tuning complete!") 
 
     dpo_dataset = build_dpo_dataset(dataset)
     model = dpo(dataset=dpo_dataset, model=model)
 
-    print("DPO complete!") 
+    tqdm.write("DPO complete!") 
 
 def test(dataset):
     pass

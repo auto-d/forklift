@@ -1,3 +1,5 @@
+import signal
+import sys
 import os
 import asyncio 
 import tempfile 
@@ -6,8 +8,7 @@ import pandas as pd
 import time 
 from httpx import RequestError, TimeoutException
 from tqdm import tqdm
-from openai import AsyncOpenAI
-from openai.error import OpenAIError
+from openai import AsyncOpenAI, OpenAIError
 from process import run_subprocess
 
 class CodebaseAnalyzer(): 
@@ -44,6 +45,7 @@ class CodebaseAnalyzer():
                     raise ValueError("Unexpected backend type!")
                 
         self.backends = backends
+        self.exit = False
         self.usage = []
         
 
@@ -63,10 +65,10 @@ class CodebaseAnalyzer():
         """
 
         if self.defs != None and refresh == False: 
-            print("Found existing symbol definition table, aborting definition extraction!")
+            tqdm.write("Found existing symbol definition table, aborting definition extraction!")
             return  
 
-        print(f"Extracting symbols from {self.input_dir}..")
+        tqdm.write(f"Extracting symbols from {self.input_dir}..")
 
         ctags_file = tempfile.mkstemp()[1]
         cmd = [
@@ -92,7 +94,7 @@ class CodebaseAnalyzer():
         # streamline the ingest into a dataframe
         data = []
         with open(ctags_file, "r") as tag_file: 
-            for line in tag_file: 
+            for line in tqdm(tag_file): 
                 data.append(json.loads(line))
 
         os.remove(ctags_file)
@@ -161,12 +163,10 @@ class CodebaseAnalyzer():
 
         if self.cscope_indexed == False or refresh == True:             
         
-            print (f"Extracting symbol references for {symbol}...")
-
             cscope_listing_file = tempfile.mkstemp()[1]
 
             # cscope wants a newline-separate list of files, oblige 
-            print("Gathering input files...")
+            tqdm.write("Gathering input files...")
             cmd = [
                 'find',
                 self.input_dir,
@@ -185,7 +185,7 @@ class CodebaseAnalyzer():
             result, files = run_subprocess(cmd, output_file=cscope_listing_file)
 
             # Now build the indices for all associated definitions    
-            print("Preparing cscope indices... ")
+            tqdm.write("Preparing cscope indices... ")
             cmd = [
                 'cscope', 
                 # Build listing only 
@@ -213,6 +213,8 @@ class CodebaseAnalyzer():
         # ../../../linux/init/do_mounts.c mount_nodev_root 346 static int __init mount_nodev_root(char *root_device_name)
         # ../../../linux/init/do_mounts.c mount_root 403 mount_nodev_root(root_device_name) == 0)
 
+        tqdm.write(f"Extracting symbol references for {symbol}...")
+
         result = {}
         result['symbol'] = symbol
         
@@ -231,15 +233,14 @@ class CodebaseAnalyzer():
         _, text = run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_ASSIGNMENTS, symbol], output=True)
         result['asnmts'] = self.parse_cscope_lines(text) 
 
-        #print (f"Extracted {len(symbols)} definitions.")
         return {} if result['refs'] == '' else result
         
-    def print_refs(self, refs): 
+    def tqdm.write_refs(self, refs): 
         if refs:                
             for key, value in refs.items(): 
                 #if key == 'symbol': 
-                #    print(f"{key}:{value}\n---------------------------")
-                print(f"{key}:\n{value}")
+                #    tqdm.write(f"{key}:{value}\n---------------------------")
+                tqdm.write(f"{key}:\n{value}")
 
     def build_symbol_map(self, defs, refs):
         """
@@ -288,13 +289,13 @@ class CodebaseAnalyzer():
             out_tokens = completion.usage.completion_tokens
         
         except TimeoutException as e:
-            print(f"Timeout: {e}")
+            tqdm.write(f"Timeout: {e}")
         except RequestError as e:
-            print(f"Network error: {e}")
+            tqdm.write(f"Network error: {e}")
         except OpenAIError as e:
-            print(f"API error: {e}")
+            tqdm.write(f"API error: {e}")
         except Exception as e:
-            print(f"Unexpected error: {e}")
+            tqdm.write(f"Unexpected error: {e}")
         finally: 
             self.usage.append({'model':backend['model'],'in_tokens':in_tokens, 'out_tokens': out_tokens, 'time': time.time() - start})
         
@@ -540,20 +541,53 @@ class CodebaseAnalyzer():
         self.dataset = pd.DataFrame()
 
         self.extract_symbol_defs()
-        for index, def_ in tqdm(self.defs.iterrows(), total=len(self.defs)): 
             
-            # Extract all refernces, assignments, etc... to this symbol and proceed 
-            # only if we've found one or more valid interactions w/ said symbol
-            refs = self.extract_symbol_refs(symbol=def_['name'])
-            if refs['refs']:
-                self.dataset = pd.concat([self.dataset, self.generate_symbol_prompts(def_, refs)])
+        # Allow a keyboard interrupt like ctrl+c to terminate teh generation, but 
+        # attempt to stop gracefully and return the dataset in its current state 
+        try:             
+            for index, def_ in tqdm(self.defs.iterrows(), total=len(self.defs)): 
+
+                # Extract all references, assignments, etc... to this symbol and proceed 
+                # only if we've found one or more valid interactions w/ said symbol
+                refs = self.extract_symbol_refs(symbol=def_['name'])
+                if refs['refs']:
+                    self.dataset = pd.concat([self.dataset, self.generate_symbol_prompts(def_, refs)])            
         
-        print(f"Dataset generated ({len(self.dataset)} rows)!")
+        except KeyboardInterrupt as interrupt: 
+            tqdm.write(f"Caught interrupt signal ({interrupt})... terminating dataset generation!")
+        
+        tqdm.write(f"Dataset generated ({len(self.dataset)} rows).")
                 
         usage = pd.DataFrame(self.usage).groupby('model').sum().reset_index()
-        print(f"Model usage:\n{usage}")
+        tqdm.write(f"Model usage:\n{usage}")
 
         return self.dataset
+
+    # TODO: employ this if KeyboardInterrupt handling doesn't have the desired effect
+    # def cleanup_and_exit(self):
+    #     """
+    #     Handle a shutdown request
+    #     """
+    #     self.exit = True        
+    #     sys.exit(0)
+
+    # def signal_handler(self, sig, frame):
+    #     """
+    #     During long generation runs we need a strategy for gracefully shutting down without loss
+    #     of data. Intercept SIGINT and write whatever data we've generated to disk before exiting. 
+    #     """
+    #     tqdm.write("Caught signal, waiting for current round of completions to terminate before writing results...")
+    #     self.cleanup_and_exit()
+
+    # def capture_signal_handler(self): 
+    #     """
+    #     Register a local signal handler to avoid bailing on SIGINT (as sent by ctrl+c in the shell)
+    #     """
+    #     self.previous_handler = signal.getsignal(signal.SIGINT)
+    #     signal.signal(signal.SIGINT, self.signal_handler)
+
+    # def restore_signal_handler(self): 
+    #     signal.signal(signal.SIGINT, self.previous_handler)
 
 def build(input_dirs, openai_key, output_dir): 
     """
@@ -595,7 +629,11 @@ def build(input_dirs, openai_key, output_dir):
     # be represented in another a common parent directory should be passed. 
     # This implies we should do some housekeeping in the passed directories if
     # we don't want some of the contained code/dirs included in this analysis. 
-    for input_dir in tqdm(input_dirs): 
+    #
+    # NOTE: keyboard interrupts will stop the generation of each dataset, but not all 
+    # so if we find one input directory looks like it will take forever to process, we
+    # can ctrl + c to boot us to the next one
+    for input_dir in input_dirs: 
 
         backends = [
             {'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'llama3.1:8b'},
@@ -604,7 +642,7 @@ def build(input_dirs, openai_key, output_dir):
             {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'}
             ]
         
-        print(f"Generating dataset based on {input_dir}...")
+        tqdm.write(f"Generating dataset based on {input_dir}...")
 
         analyzer = CodebaseAnalyzer(input_dir, backends)
         dataset = analyzer.generate_dataset() 
@@ -613,9 +651,9 @@ def build(input_dirs, openai_key, output_dir):
         output_file = os.path.join(output_dir,f"{input_base}.parquet")
         dataset.to_parquet(output_file)
         
-        print(f"Wrote dataset for {input_dir} to {output_file}.")
+        tqdm.write(f"Wrote dataset for {input_dir} to {output_file}.")
     
-    print(f"Generation campaign complete!")
+    tqdm.write(f"Generation campaign complete!")
 
 def load_dataset(path): 
     """
