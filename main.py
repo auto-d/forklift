@@ -6,6 +6,7 @@ import slm
 import tempfile
 import glob
 import dataset
+import asyncio 
 from process import run_subprocess
 
 def deploy_demo(token): 
@@ -159,4 +160,4 @@ def router():
             parser.print_help()
 
 if __name__ == "__main__": 
-    router() 
+    router()
