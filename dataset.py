@@ -648,7 +648,7 @@ def build(input_dirs, openai_key, output_dir):
             {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'}
             ]
         
-        print("Generating dataset based on {input_dir}...")
+        print(f"Generating dataset based on {input_dir}...")
 
         analyzer = CodebaseAnalyzer(input_dir, backends)
         dataset = analyzer.generate_dataset() 

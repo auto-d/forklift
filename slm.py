@@ -110,7 +110,7 @@ def build_dpo_dataset(dataset):
     print('Building DPO dataset...')
 
     copy = dataset.rename(columns={'x2':'prompt','yp':'chosen','yu':'rejected'})
-    copy.drop(['yp','yu','x0','x2'], axis=1, inplace=True)
+    copy.drop(['x0','x', 'y'], axis=1, inplace=True)
     dpo_dataset = Dataset.from_pandas(copy)
     
     print(f"Done ({len(dpo_dataset)} rows)!")
@@ -131,7 +131,7 @@ def train(dataset_path, model_path, steps=None, epochs=1):
     print("Supervised fine-tuning complete!") 
 
     dpo_dataset = build_dpo_dataset(dataset)
-    model = dpo(dataset=dpo_dataset)
+    model = dpo(dataset=dpo_dataset, model=model)
 
     print("DPO complete!") 
 

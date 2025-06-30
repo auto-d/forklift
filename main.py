@@ -110,7 +110,7 @@ def router():
     # Train mode 
     train_parser = subparsers.add_parser("train") 
     train_parser.add_argument("--dataset", type=readable_file, help="File containing input dataset to train on ", required=True)
-    train_parser.add_argument("--model_dir", type=readable_dir, help="Directory to write resulting models to", required=True)
+    train_parser.add_argument("--model_dir", help="Directory to write resulting models to", required=True)
     train_parser.add_argument("--nn_steps", type=int, default=-1)
     train_parser.add_argument("--nn_epochs", type=int, default=3)
     train_parser.add_argument("--type", choices=['naive', 'classic', 'neural'], default='neural')
