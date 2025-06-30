@@ -110,7 +110,7 @@ class CodebaseAnalyzer():
         self.defs['line'] = self.defs['line'].fillna(0).astype(int)
         self.defs.fillna('', inplace=True)
 
-        print (f"Extracted {len(self.defs)} definitions.")
+        tqdm.write(f"Extracted {len(self.defs)} definitions.")
 
     def parse_cscope_lines(self, lines): 
         """
@@ -355,6 +355,11 @@ class CodebaseAnalyzer():
         it's more about available compute. We'd really only realize a gain with openAI
         """
         tasks = []
+        
+        # NOTE: We are enforcing a sequential generation on the prompts that is constraining 
+        # our throughput... instead of iterating over the backends, we should just be putting 
+        # these tasks in an async queue and letting the next available worker/task (1-1 mapping 
+        # with available backens) complete the task and put it onto a result queue. 
         for backend in self.backends: 
             tasks.append(self.embellish_prompt_for_backend(x, context, backend))
 
@@ -567,35 +572,10 @@ class CodebaseAnalyzer():
         tqdm.write(f"Dataset generated ({len(self.dataset)} rows).")
                 
         usage = pd.DataFrame(self.usage).groupby('model').sum().reset_index()
+        usage['tps'] = usage['out_tokens']/usage['time']
         tqdm.write(f"Model usage:\n{usage}")
 
         return self.dataset
-
-    # TODO: employ this if KeyboardInterrupt handling doesn't have the desired effect
-    # def cleanup_and_exit(self):
-    #     """
-    #     Handle a shutdown request
-    #     """
-    #     self.exit = True        
-    #     sys.exit(0)
-
-    # def signal_handler(self, sig, frame):
-    #     """
-    #     During long generation runs we need a strategy for gracefully shutting down without loss
-    #     of data. Intercept SIGINT and write whatever data we've generated to disk before exiting. 
-    #     """
-    #     tqdm.write("Caught signal, waiting for current round of completions to terminate before writing results...")
-    #     self.cleanup_and_exit()
-
-    # def capture_signal_handler(self): 
-    #     """
-    #     Register a local signal handler to avoid bailing on SIGINT (as sent by ctrl+c in the shell)
-    #     """
-    #     self.previous_handler = signal.getsignal(signal.SIGINT)
-    #     signal.signal(signal.SIGINT, self.signal_handler)
-
-    # def restore_signal_handler(self): 
-    #     signal.signal(signal.SIGINT, self.previous_handler)
 
 def build(input_dirs, openai_key, output_dir): 
     """
@@ -644,10 +624,12 @@ def build(input_dirs, openai_key, output_dir):
     for input_dir in input_dirs: 
 
         backends = [
-            {'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'llama3.1:8b'},
+            #{'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'llama3.1:8b'},
+            #{'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'qwen2.5-coder:3b'},
             # This guy's a little too slow to participate in the larger campaign... 
             #{'type':'ollama', 'url': "http://10.0.0.37:11435/v1", 'model': 'qwen2.5-coder:3b'},
-            {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'}
+            #{'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'},
+            {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-nano'}
             ]
         
         tqdm.write(f"Generating dataset based on {input_dir}...")
