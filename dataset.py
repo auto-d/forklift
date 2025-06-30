@@ -160,10 +160,6 @@ class CodebaseAnalyzer():
         if self.cscope_indexed == False or refresh == True:             
         
             print (f"Extracting symbol references for {symbol}...")
-            
-            # TODO: hide this behind a class so we can stash things like the target
-            # directory and avoid multiple invocations here (even though these are 
-            # probably not that expensive after the first call)
 
             cscope_listing_file = tempfile.mkstemp()[1]
 
@@ -215,7 +211,6 @@ class CodebaseAnalyzer():
         # ../../../linux/init/do_mounts.c mount_nodev_root 346 static int __init mount_nodev_root(char *root_device_name)
         # ../../../linux/init/do_mounts.c mount_root 403 mount_nodev_root(root_device_name) == 0)
 
-        #TODO: iterate over all symbols discovered previously? or have cscope just extract all?         
         result = {}
         result['symbol'] = symbol
         
@@ -299,8 +294,8 @@ class CodebaseAnalyzer():
 
         NOTE: Hasty prompt development with the help of gpt4o: https://chatgpt.com/share/6860bcae-7674-8013-9785-e99a78814b6d
         """
-        y_system = "You are a Linux kernel expert. Provide a clear, CONCISE and technically rigorous answer using kernel-specific terminology and referencing relevant APIs, subsystems, or patterns."
-        yp_system = "As a senior Linux kernel developer, provide a clear, CONCISE, and well-reasoned answer using kernel idioms and terminology"
+        y_system = "You are a Linux kernel expert. Provide a clear, CONCISE and rigorous answer using kernel-specific terminology and referencing relevant APIs, subsystems, or patterns. You will be provided with code search results from the Linux kernel which are authoritative."
+        yp_system = "As a senior Linux kernel developer, provide a clear, CONCISE, and well-reasoned response using kernel idioms and terminology. You will be provided with code search results from the Linux kernel which are authoritative. "
         yu_system = "You are a Linux kernel specialist. Your responses should be CONCISE."
 
         set_ = {}
@@ -549,35 +544,35 @@ class CodebaseAnalyzer():
             # TODO: ref-specific prompts
             pass 
 
-        #sets.extend(self.embellish_prompt(f"Where is the {symbol} referenced?", context=self.print_cscope_dicts(refs['refs']))) 
+        sets.extend(self.embellish_prompt(f"Where is the {symbol} referenced?", context=self.print_cscope_dicts(refs['refs']))) 
 
         # Symbol Definitions
         for def_ in refs['defs']: 
             # TODO: definition-specific prompts            
             pass
     
-        #sets.extend(self.embellish_prompt(f"Where else is the {symbol} defined?", context=self.print_cscope_dicts(refs['defs']))) 
+        sets.extend(self.embellish_prompt(f"Where else is the {symbol} defined?", context=self.print_cscope_dicts(refs['defs']))) 
 
         # Functions called from associated function's scope (if any)
         for child in refs['children']:  
             # TODO: child-specific...           
             pass
 
-        #sets.extend(self.embellish_prompt(f"What functions does {symbol} call?", context=self.print_cscope_dicts(refs['children']))) 
+        sets.extend(self.embellish_prompt(f"What functions does {symbol} call?", context=self.print_cscope_dicts(refs['children']))) 
 
         # Functions that call the associated function symbol (if any)
         for parent in refs['parents']:
             # TODO: parent specific prompts
             pass
 
-        #sets.extend(self.embellish_prompt(f"What functions is {symbol} called by?", context=self.print_cscope_dicts(refs['parents'])))
+        sets.extend(self.embellish_prompt(f"What functions is {symbol} called by?", context=self.print_cscope_dicts(refs['parents'])))
                                                                                                                         
         # Assignment operations (if any)
         for asnmt in refs['asnmts']:       
             # TODO: assignment prompts..      
             pass
 
-        #sets.extend(self.embellish_prompt(f"Where are assignments made to {symbol}?", context=self.print_cscope_dicts(refs['asnmts'])))
+        sets.extend(self.embellish_prompt(f"Where are assignments made to {symbol}?", context=self.print_cscope_dicts(refs['asnmts'])))
 
         return pd.DataFrame(sets)
 
@@ -596,7 +591,6 @@ class CodebaseAnalyzer():
             refs = self.extract_symbol_refs(symbol=def_['name'])
             if refs['refs']:
                 self.dataset = pd.concat([self.dataset, self.generate_symbol_prompts(def_, refs)])
-                break 
         
         print(f"Dataset generated ({len(self.dataset)} rows)!")
                 
@@ -649,7 +643,8 @@ def build(input_dirs, openai_key, output_dir):
 
         backends = [
             {'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'llama3.1:8b'},
-            {'type':'ollama', 'url': "http://10.0.0.37:11435/v1", 'model': 'qwen2.5-coder:3b'},
+            # This guy's a little too slow to participate in the larger campaign... 
+            #{'type':'ollama', 'url': "http://10.0.0.37:11435/v1", 'model': 'qwen2.5-coder:3b'},
             {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'}
             ]
         
@@ -662,7 +657,9 @@ def build(input_dirs, openai_key, output_dir):
         output_file = os.path.join(output_dir,f"{input_base}.parquet")
         dataset.to_parquet(output_file)
         
-        print("Wrote dataset for {input_dir} to {output_file}.")
+        print(f"Wrote dataset for {input_dir} to {output_file}.")
+    
+    print(f"Generation campaign complete!")
 
 def load_dataset(path): 
     """

@@ -65,8 +65,8 @@ def load_secrets():
 
 def readable_file(path):
     """Test for a readable file"""
-    if os.path.exists(path):
-        raise argparse.ArgumentTypeError(f"'{path}' already exists.")
+    if not os.path.exists(path):
+        raise argparse.ArgumentTypeError(f"'{path}' doesn't exist.")
     return path
 
 def nonexistent_file(path):
@@ -104,23 +104,25 @@ def router():
 
     # Build mode 
     build_parser = subparsers.add_parser("build") 
-    build_parser.add_argument("--inputs", nargs="+", type=readable_dir, help="List of code directories to target", required=True)
+    build_parser.add_argument("--inputs", nargs="+", type=readable_dir, help="List of code directories to target, one dataset file will be emitted for each", required=True)
     build_parser.add_argument("--dataset", help="Directory to write resulting dataset to", required=True)
 
     # Train mode 
     train_parser = subparsers.add_parser("train") 
-    train_parser.add_argument("--dataset", type=readable_file, help="Directory containing input dataset to train on ", required=True)
-    train_parser.add_argument("--model", type=nonexistent_file, help="File to write resulting models to (each will get a different suffix)", required=True)
+    train_parser.add_argument("--dataset", type=readable_file, help="File containing input dataset to train on ", required=True)
+    train_parser.add_argument("--model_dir", type=readable_dir, help="Directory to write resulting models to", required=True)
+    train_parser.add_argument("--nn_steps", type=int, default=-1)
+    train_parser.add_argument("--nn_epochs", type=int, default=3)
     train_parser.add_argument("--type", choices=['naive', 'classic', 'neural'], default='neural')
 
     # Test mode 
     test_parser = subparsers.add_parser("test") 
-    test_parser.add_argument("--model", type=readable_file, help="File to load model from")
+    test_parser.add_argument("--model_dir", type=readable_dir, help="Directory to load model from")
     test_parser.add_argument("--type", choices=['naive', 'classic', 'neural'], default='neural')
 
     # Deploy mode 
     deploy_parser = subparsers.add_parser("deploy")
-    deploy_parser.add_argument("--model", type=readable_file, help="Directory to load model from")
+    deploy_parser.add_argument("--model_dir", type=readable_dir, help="Directory to load model from")
     deploy_parser.add_argument("--type", choices=['naive', 'classic', 'neural'], default='neural')
     deploy_parser.add_argument("--refresh",  action="store_true", help="Whether or not to refresh the server code prior to deployment.", default=False)
     
@@ -137,11 +139,11 @@ def router():
 
         case "train":
             if args.type == 'naive':
-                naive.train(args.dataset, args.model)
+                naive.train(args.dataset, args.model_dir)
             if args.type == 'classic':
-                hmm.train(args.dataset, args.model) 
+                hmm.train(args.dataset, args.model_dir) 
             if args.type == 'neural': 
-                slm.train(args.dataset, args.model)
+                slm.train(args.dataset, args.model_dir, args.nn_steps, args.nn_epochs)
 
         case "test":
             if args.type == 'naive':
@@ -153,7 +155,7 @@ def router():
 
         case "deploy":            
             if hf_token: 
-                deploy(args.model, hf_token, args.refresh)
+                deploy(args.model_dir, hf_token, args.refresh)
             else: 
                 print("No huggingface token found!")
         case _:
