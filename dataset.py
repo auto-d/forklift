@@ -4,8 +4,10 @@ import tempfile
 import json 
 import pandas as pd
 import time 
+from httpx import RequestError, TimeoutException
 from tqdm import tqdm
 from openai import AsyncOpenAI
+from openai.error import OpenAIError
 from process import run_subprocess
 
 class CodebaseAnalyzer(): 
@@ -264,18 +266,37 @@ class CodebaseAnalyzer():
             messages.append({ "role": "user", "content": f"source search results:\n{context}" })
         messages.append({ "role": "user","content": message })
 
-        completion = await backend['client'].chat.completions.create(
-            model=backend['model'],
-            messages=messages,
-            temperature=temperature
-        )
+        # Default these in case of exception, we can look for any zeroed out tokens in the 
+        # usage later to determine how many API calls failed.  
+        in_tokens = 0
+        out_tokens = 0
+        response = ""
 
-        response = completion.choices[0].message.content
+        # Execute our completiong with some hopefully exhaustive error handling to avoid 
+        # a network or API issue from blowing up our dataset synthesis
+        # NOTE: error handling with help from gpt-4o: https://chatgpt.com/share/6862b54e-6298-8013-84fe-47893157bc29
+        try: 
+            completion = await backend['client'].chat.completions.create(
+                model=backend['model'],
+                messages=messages,
+                temperature=temperature
+            )
 
-        in_tokens = completion.usage.prompt_tokens
-        out_tokens = completion.usage.completion_tokens
-    
-        self.usage.append({'model':backend['model'],'in_tokens':in_tokens, 'out_tokens': out_tokens, 'time': time.time() - start})
+            response = completion.choices[0].message.content
+
+            in_tokens = completion.usage.prompt_tokens
+            out_tokens = completion.usage.completion_tokens
+        
+        except TimeoutException as e:
+            print(f"Timeout: {e}")
+        except RequestError as e:
+            print(f"Network error: {e}")
+        except OpenAIError as e:
+            print(f"API error: {e}")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+        finally: 
+            self.usage.append({'model':backend['model'],'in_tokens':in_tokens, 'out_tokens': out_tokens, 'time': time.time() - start})
         
         return response
 
@@ -449,96 +470,31 @@ class CodebaseAnalyzer():
         # ways... temperature, weaker models, system prompt variation, etc... we really need 
         # a graph at some point, but for now rely on the model to make the connections internally
         # between the web of symbols and their links outlined here
-        # TODO: go deeper on these questions once more source context is available... we really need to 
-        # toss entire functions into the context for the embellishing
-        # notably, implement the Q&A suggestions here: https://chatgpt.com/share/6860d282-ab3c-8013-89cc-7709cdf36bf7
-        # and don't forget to reference the conversation: 
-        # General Architecture and Design
-        # What is the overall architecture and modular structure of the Linux kernel?
-        # How are kernel subsystems organized in the source tree?
-        # What are the roles of the main directories like kernel/, arch/, drivers/, fs/, and net/?
-        # How does the Linux kernel handle hardware abstraction?
-        # What are the core components responsible for process and memory management?
-        # Build and Configuration
-        # How is the Linux kernel configured and built?
-        # What files control the kernel build process?
-        # How do Kconfig and Makefiles work together to configure the kernel build?
-        # How can one add or modify kernel configuration options?
-        # Kernel Initialization
-        # Where is the kernel’s entry point during system boot?
-        # How does the Linux kernel initialize hardware and drivers at startup?
-        # What is the role of the initramfs in kernel initialization?
-        # Process Management and Scheduling
-        # How does the kernel implement process scheduling?
-        # Where is the scheduler code located?
-        # What data structures represent processes or tasks?
-        # How are system calls handled and dispatched?
-        # Memory Management
-        # How does the kernel manage physical and virtual memory?
-        # What are the major components of the memory management subsystem?
-        # Where are page tables and virtual memory managed in the source?
-        # How does the kernel handle memory allocation and freeing?
-        # Device Drivers
-        # How are device drivers organized in the Linux kernel source?
-        # What is the structure of a typical device driver?
-        # How are drivers registered and initialized?
-        # How does the kernel communicate with hardware devices?
-        # Filesystems
-        # Where is the implementation of the Virtual Filesystem (VFS)?
-        # How are individual filesystem drivers implemented?
-        # How does the kernel handle mounting and unmounting filesystems?
-        # What mechanisms are used for caching and buffering filesystem data?
-        # Networking
-        # Where is the networking stack implemented?
-        # How does the kernel handle network protocols?
-        # How are network devices registered and managed?
-        # What is the role of the socket interface in the kernel?
-        # Synchronization and Concurrency
-        # How does the kernel handle synchronization between processes and interrupts?
-        # What locking primitives are available in the kernel?
-        # How does the kernel prevent deadlocks and race conditions?
-        # Debugging and Instrumentation
-        # What tools or mechanisms exist in the kernel for debugging?
-        # How are kernel logs and printk messages generated and managed?
-        # Where is support for tracing and performance monitoring implemented?
-        # Security
-        # How does the kernel enforce security policies?
-        # What subsystems are responsible for access control?
-        # How are capabilities and privileges managed?
-        # Kernel API and Internal Interfaces
-        # What are the main internal APIs for kernel modules?
-        # How can external modules interact with the kernel?
-        # What conventions are used for coding style and documentation?
-        # Versioning and Maintenance
-        # How is versioning handled within the kernel source?
-        # Where are changelogs or commit histories maintained?
-        # How are patches and contributions managed?
-        # Specific Questions about Source Files or Functions
-        # What is the purpose of init/main.c?
-        # How does schedule() function operate internally?
-        # Where is the implementation of do_fork() located?
-        # What is the role of the syscall_table?
+        # NOTE: other things to try ... 
+        # - implement recursive summarzation block-> function-> file -> directory -> parent ... 
+        # - implement grepping or tree-sitter extraction for contextual lines beyond the single identified line here 
+        #   e.g. grep_context = retrieve_context(file, line, size=5)
+        # - build a proper graph of calls and generate arbitrary questions about connections in that graph
+        # - here are some hastily-scrawled prompt generation calls based on a conversation with gpt-4o (see
+        #   https://chatgpt.com/share/6860d282-ab3c-8013-89cc-7709cdf36bf7): 
+        #     prompt_set += self.embellish_prompt(f"What is the purpose of {symbol} ?", context=grep_context) 
+        #     prompt_set += self.embellish_prompt(f"What roles does {symbol} have in the system?", context=grep_context) 
+        #     prompt_set += self.embellish_prompt(f"How is {symbol} relevant to the system architecture?", context=grep_context) 
+        #     prompt_set += self.embellish_prompt(f"How is the file {symbole} resides in organized ?", context=file-context) 
+        #     prompt_set += self.embellish_prompt(f"What other files and symbols are important in {symbol}'s subsystem?", context=file-list_context) 
+        #     prompt_set += self.embellish_prompt(f"What subsystem does {symbol} belong to?", context=grep_context) 
+        #     prompt_set += self.embellish_prompt(f"Is memory being managed by {symbol}?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"What dependencies does {symbol} have?) 
+        #     prompt_set += self.embellish_prompt(f"What happens if {symbol} is corrupted?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"Does {symbol} process network traffic?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"Is {symbol} associated with security policies?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"Does {symbol} assist with threading?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"Can {symbol} interact with user mode processes?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"What APIs might be associated with {symbol}?", context=grep_context_all_refs) 
 
         # Symbols    
         sets.extend(self.embellish_prompt(f"What file is {symbol} defined in?", context=f"{kind} {symbol} {sig} found in file:{path} @ line {line}.")) 
-        #TODO: implement recursive summarzation block-> function-> file -> directory -> parent ... 
-        #TODO: implement grepping for contextual lines beyond the single identified line here 
-        #grep_context = retrieve_context(file, line, size=5)
-        #prompt_set += self.embellish_prompt(f"What is the purpose of {symbol} ?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"What roles does {symbol} have in the system?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"How is {symbol} relevant to the system architecture?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"How is the file {symbole} resides in organized ?", context=file-context) 
-        #prompt_set += self.embellish_prompt(f"What other files and symbols are important in {symbol}'s subsystem?", context=file-list_context) 
-        #prompt_set += self.embellish_prompt(f"What subsystem does {symbol} belong to?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"Is memory being managed by {symbol}?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"What depenencies does {symbol} have?) 
-        #prompt_set += self.embellish_prompt(f"What happens if {symbol} is corrupted?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"Does {symbol} process network traffic?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"Is {symbol} associated with security policies?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"Does {symbol} assist with threading?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"Can {symbol} interact with user mode processes?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"What APIs might be associated with {symbol}?", context=grep_context_all_refs) 
-
+        
         # Symbol References        
         for ref in refs['refs']: 
             # TODO: ref-specific prompts
