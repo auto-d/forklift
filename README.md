@@ -4,11 +4,8 @@ Lift your understanding of any repo! 📦⬆
 
 ## TODO 
 
-- write an iterative decomposition and dataset building tool 
-      - tree-sitter and AST integration point? 
-    - alternative or in addition to: build a proper graph to drive DPO or validation? 
-    - change the ingest to record path as if we're in the root of the linux kernel repo ... at present the paths are misleading
-- explore transformers fine-tuning support
+- add error handling around completions, we can't bust the generation of the dataset if 
+- validate our completions -- they have to be high quality for this to work out!
 - find tensorboard traces asociated with model training
   - ensure we can see both training and validation loss
 - decide on evaluation strategy ... 
@@ -170,6 +167,11 @@ All testing done with Python 3.12
 `--train`
 `--test`
 `--deploy` : requires HF_TOKEN environment variable to be set. This can be manually exported or alternatively,  is implicit after a `huggingface-cli login` completes. 
+
+
+```
+usage: forklift train [-h] --dataset DATASET --model_dir MODEL_DIR [--nn_steps NN_STEPS] [--nn_epochs NN_EPOCHS] [--type {naive,classic,neural}]
+```
 
 **Visualizing Training Loss** 
 
