@@ -235,12 +235,12 @@ class CodebaseAnalyzer():
 
         return {} if result['refs'] == '' else result
         
-    def tqdm.write_refs(self, refs): 
+    def print_refs(self, refs): 
         if refs:                
             for key, value in refs.items(): 
                 #if key == 'symbol': 
                 #    tqdm.write(f"{key}:{value}\n---------------------------")
-                tqdm.write(f"{key}:\n{value}")
+                print(f"{key}:\n{value}")
 
     def build_symbol_map(self, defs, refs):
         """
@@ -493,43 +493,51 @@ class CodebaseAnalyzer():
         #     prompt_set += self.embellish_prompt(f"Can {symbol} interact with user mode processes?", context=grep_context_all_refs) 
         #     prompt_set += self.embellish_prompt(f"What APIs might be associated with {symbol}?", context=grep_context_all_refs) 
 
-        # Symbols    
-        sets.extend(self.embellish_prompt(f"What file is {symbol} defined in?", context=f"{kind} {symbol} {sig} found in file:{path} @ line {line}.")) 
+        with tqdm(total=6) as progress:
+
+            # Symbols    
+            sets.extend(self.embellish_prompt(f"What file is {symbol} defined in?", context=f"{kind} {symbol} {sig} found in file:{path} @ line {line}.")) 
+            progress.update(1)
+
+            # Symbol References        
+            for ref in refs['refs']: 
+                # TODO: ref-specific prompts
+                pass 
+
+            sets.extend(self.embellish_prompt(f"Where is the {symbol} referenced?", context=self.print_cscope_dicts(refs['refs']))) 
+            progress.update(1)
+
+            # Symbol Definitions
+            for def_ in refs['defs']: 
+                # TODO: definition-specific prompts            
+                pass
         
-        # Symbol References        
-        for ref in refs['refs']: 
-            # TODO: ref-specific prompts
-            pass 
+            sets.extend(self.embellish_prompt(f"Where else is the {symbol} defined?", context=self.print_cscope_dicts(refs['defs']))) 
+            progress.update(1)
 
-        sets.extend(self.embellish_prompt(f"Where is the {symbol} referenced?", context=self.print_cscope_dicts(refs['refs']))) 
+            # Functions called from associated function's scope (if any)
+            for child in refs['children']:  
+                # TODO: child-specific...           
+                pass
 
-        # Symbol Definitions
-        for def_ in refs['defs']: 
-            # TODO: definition-specific prompts            
-            pass
-    
-        sets.extend(self.embellish_prompt(f"Where else is the {symbol} defined?", context=self.print_cscope_dicts(refs['defs']))) 
+            sets.extend(self.embellish_prompt(f"What functions does {symbol} call?", context=self.print_cscope_dicts(refs['children']))) 
+            progress.update(1)
 
-        # Functions called from associated function's scope (if any)
-        for child in refs['children']:  
-            # TODO: child-specific...           
-            pass
+            # Functions that call the associated function symbol (if any)
+            for parent in refs['parents']:
+                # TODO: parent specific prompts
+                pass
 
-        sets.extend(self.embellish_prompt(f"What functions does {symbol} call?", context=self.print_cscope_dicts(refs['children']))) 
+            sets.extend(self.embellish_prompt(f"What functions is {symbol} called by?", context=self.print_cscope_dicts(refs['parents'])))
+            progress.update(1)
+                                                                                                                            
+            # Assignment operations (if any)
+            for asnmt in refs['asnmts']:       
+                # TODO: assignment prompts..      
+                pass
 
-        # Functions that call the associated function symbol (if any)
-        for parent in refs['parents']:
-            # TODO: parent specific prompts
-            pass
-
-        sets.extend(self.embellish_prompt(f"What functions is {symbol} called by?", context=self.print_cscope_dicts(refs['parents'])))
-                                                                                                                        
-        # Assignment operations (if any)
-        for asnmt in refs['asnmts']:       
-            # TODO: assignment prompts..      
-            pass
-
-        sets.extend(self.embellish_prompt(f"Where are assignments made to {symbol}?", context=self.print_cscope_dicts(refs['asnmts'])))
+            sets.extend(self.embellish_prompt(f"Where are assignments made to {symbol}?", context=self.print_cscope_dicts(refs['asnmts'])))
+            progress.update(1)
 
         return pd.DataFrame(sets)
 
