@@ -66,7 +66,7 @@ def respond_opt(
     """
 
     input = base_tokenizer([message], return_tensors="pt").to(device)
-    ids = base_model.generate(**input, max_new_tokens=100, do_sample=False, streamer=streamer)
+    ids = base_model.generate(**input, max_new_tokens=max_tokens, temperature=temperature, do_sample=False, streamer=streamer)
     
     response = ""
 
@@ -97,7 +97,7 @@ def respond_qwen(message,
     )
     model_inputs = base_tokenizer2([text], return_tensors="pt").to(base_model2.device)
 
-    ids = base_model2.generate(**model_inputs,max_new_tokens=512, streamer=streamer2)
+    ids = base_model2.generate(**model_inputs,max_new_tokens=max_tokens, temperature=temperature, streamer=streamer2)
     
     response = ""    
     for text in streamer2: 
@@ -125,8 +125,7 @@ def respond(
         messages,
         max_tokens=max_tokens,
         stream=True,
-        temperature=temperature,
-        top_p=top_p,
+        temperature=temperature
     ):
         token = message.choices[0].delta.content
 
@@ -140,21 +139,27 @@ def app():
     demo = gr.Blocks()
     with demo: 
         gr.Markdown(value="# ⚙️ Welcome!")
-        gr.ChatInterface(
-            fn=respond_qwen,
-            additional_inputs=[
-                gr.Textbox(value="You are a friendly Chatbot.", label="System message"),
-                gr.Slider(minimum=1, maximum=2048, value=512, step=1, label="Max new tokens"),
-                gr.Slider(minimum=0.1, maximum=4.0, value=0.7, step=0.1, label="Temperature"),
-                gr.Slider(
-                    minimum=0.1,
-                    maximum=1.0,
-                    value=0.95,
-                    step=0.05,
-                    label="Top-p (nucleus sampling)",
-                )
-            ],
-            type="messages") 
+        with gr.Row():
+            with gr.Column(): 
+                gr.ChatInterface(
+                    title="Qwen2.5-Instruct 0.5b",
+                    fn=respond_qwen,
+                    additional_inputs=[
+                        gr.Textbox(value="You are a friendly Chatbot.", label="System message"),
+                        gr.Slider(minimum=1, maximum=2048, value=512, step=1, label="Max new tokens"),
+                        gr.Slider(minimum=0.1, maximum=4.0, value=0.7, step=0.1, label="Temperature")
+                    ],
+                    type="messages") 
+            with gr.Column(): 
+                gr.ChatInterface(
+                    title="Qwen2.5-Instruct 0.5b Linux-tuned",
+                    fn=respond_opt,
+                    additional_inputs=[
+                        gr.Textbox(value="You are a friendly Chatbot.", label="System message"),
+                        gr.Slider(minimum=1, maximum=2048, value=512, step=1, label="Max new tokens"),
+                        gr.Slider(minimum=0.1, maximum=4.0, value=0.7, step=0.1, label="Temperature")
+                    ],
+                    type="messages") 
         
         demo.launch(share=False)
 
