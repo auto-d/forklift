@@ -86,10 +86,10 @@ def respond_qwen(message,
     # formatting to ... 
     # TODO ensure any completions we're doing are with the help of the GPU! ... test that on HF, we'll need to 
     # move to the sliced GPU setup? ugh
-    messages = [
-        {"role": "system", "content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
-        {"role": "user", "content": message}
-    ]
+    messages = [ {"role": "system", "content": system_message} ]
+    messages.extend(history)
+    messages.append({"role": "user", "content": message})
+
     text = base_tokenizer2.apply_chat_template(
         messages,
         tokenize=False,
@@ -97,23 +97,15 @@ def respond_qwen(message,
     )
     model_inputs = base_tokenizer2([text], return_tensors="pt").to(base_model2.device)
 
-    # streamer argument is explicitly for generated tokens, and will receive each 
-    # as it becomes available
     ids = base_model2.generate(**model_inputs,max_new_tokens=512, streamer=streamer2)
     
     response = ""    
-    for stream in streamer2: 
-
-        if stream != "": 
-            streamed_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, stream)
-            ]
-            
-            text = base_tokenizer2.decode(streamed_ids, skip_special_tokens=True)[0]
-            if text: 
-                response += text
-                yield response
-                sleep(0.02)
+    for text in streamer2: 
+        if text != "":             
+            response += text
+            yield response
+            # We are synchronous here, but simulate some typing to keep things satisfying. 
+            time.sleep(0.02)
 
 def respond(
     message,
@@ -124,13 +116,7 @@ def respond(
     top_p,
 ):
     messages = [{"role": "system", "content": system_message}]
-
-    for val in history:
-        if val[0]:
-            messages.append({"role": "user", "content": val[0]})
-        if val[1]:
-            messages.append({"role": "assistant", "content": val[1]})
-
+    messages.extend(history)
     messages.append({"role": "user", "content": message})
 
     response = ""
