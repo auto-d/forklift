@@ -113,6 +113,7 @@ def router():
     train_parser.add_argument("--model_dir", help="Directory to write resulting models to", required=True)
     train_parser.add_argument("--nn_steps", type=int, default=-1)
     train_parser.add_argument("--nn_epochs", type=int, default=3)
+    train_parser.add_argument("--nn_batch", type=int, default=8)
     train_parser.add_argument("--type", choices=['naive', 'classic', 'neural'], default='neural')
 
     # Test mode 
@@ -143,7 +144,7 @@ def router():
             if args.type == 'classic':
                 hmm.train(args.dataset, args.model_dir) 
             if args.type == 'neural': 
-                slm.train(args.dataset, args.model_dir, args.nn_steps, args.nn_epochs)
+                slm.train(args.dataset, args.model_dir, args.nn_batch, args.nn_steps, args.nn_epochs)
 
         case "test":
             if args.type == 'naive':

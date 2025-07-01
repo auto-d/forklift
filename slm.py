@@ -15,7 +15,7 @@ def summarize_history(history):
     s += f" - Eval runtime: {df.eval_runtime.sum():.2f}s ({df.eval_runtime.mean():.2f}s/eval)\n"
     return s
     
-def sft(dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, epochs=1, path=None):
+def sft(dataset, model="facebook/opt-350m", batch_size=8, max_steps=-1, epochs=1, path=None):
     """
     Initiate a supervised fine-tuning run on the target model
     """
@@ -51,7 +51,7 @@ def sft(dataset, model="facebook/opt-350m", batch_size=1, max_steps=-1, epochs=1
         # the trainer will retrieve that value from the tokenizer. Some tokenizers 
         # do not provide a default value, so there is a check to retrieve the minimum
         # between 1024 and that value. Make sure to check it before training.
-        #max_length=512, 
+        max_length=512, 
         output_dir="runs", 
         num_train_epochs=epochs, 
         max_steps=max_steps, 
@@ -130,7 +130,7 @@ def build_dpo_dataset(dataset):
 
     return dpo_dataset
 
-def train(dataset_path, model_path, steps=None, epochs=1): 
+def train(dataset_path, model_path, batch_size=8, steps=None, epochs=1): 
     """
     Train our derivitative model 
     """    
@@ -142,7 +142,7 @@ def train(dataset_path, model_path, steps=None, epochs=1):
     tqdm.write(f"Holding {test_train_ratio}% out for validation...")    
     sft_dataset = sft_dataset.train_test_split(test_size=test_train_ratio)
 
-    model, summary = sft(sft_dataset, path=model_path, max_steps=steps, epochs=epochs)    
+    model, summary = sft(sft_dataset, path=model_path, batch_size=batch_size, max_steps=steps, epochs=epochs)    
     tqdm.write(summary)
 
     # TODO: add a sanity check to validate the model's sequence length and flag any 
