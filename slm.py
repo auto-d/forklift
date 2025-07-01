@@ -1,4 +1,5 @@
 import pandas as pd 
+import torch
 from tqdm import tqdm
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset, Dataset
@@ -20,44 +21,54 @@ def sft(dataset, model="facebook/opt-350m", batch_size=8, max_steps=-1, epochs=1
     Initiate a supervised fine-tuning run on the target model
     """
 
+    model_args = {}
+    config_args = {}
+    gradient_checkpointing = False
+
+    match model: 
+        case "facebook/opt-350m":             
+            config_args['max_length'] = 512
+
+        case "Qwen/Qwen2.5-0.5B-Instruct" | "Qwen/Qwen2.5-0.5B":                         
+            # With 24GB of VRAM we can just skate under the ceiling w/ 
+            # a sequence of 512 and loading the base model in bfloat16, 
+            # if full-precision is desired, try any of these: 
+            #  - reduce sequence length here
+            #  - enable gradient checkpointing (more time, less mem usage)
+            #  - lower the batch size
+            model_args['torch_dtype'] = torch_dtype=torch.bfloat16
+            config_args['max_length'] = 512
+            config_args['eos_token'] = "<|im_end|>"
+        case _: 
+            raise ValueError("Unsupported model!")
+    
     # NOTE: Take care we don't violate this warning from SFTTrainer best practices (see docs)
     # If you create a model outside the trainer, make sure not to pass to the trainer any 
     # additional keyword arguments that are relative to from_pretrained() method.
-    base = AutoModelForCausalLM.from_pretrained(model)
-    tqdm.write("Loaded base model: " + base.__class__.__name__)
-    tqdm.write("-------------------------------------------------")
+    base = AutoModelForCausalLM.from_pretrained(model, **model_args)
+    
+    if gradient_checkpointing: 
+        tqdm.write("Gradient checkpointing enabled")
+        base.gradient_checkpointing_enable() 
 
-    # TODO: investigate whether a change in precision is supportable here!
-    # per https://huggingface.co/docs/trl/en/sft_trainer#control-over-the-pretrained-model
-    # ... we can load the base model in an alternative precision here: 
-    # model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", torch_dtype=torch.bfloat16)
-    # training_args = SFTConfig(
-    #     model_init_kwargs={
-    #         "torch_dtype": "bfloat16",
-    #     },
-    #     output_dir="/tmp",
-    # )
-    # trainer = SFTTrainer(
-    #     "facebook/opt-350m",
-    #     train_dataset=dataset,
-    #     args=training_args,
-    # )
+    tqdm.write("Loaded base model: " + base.__class__.__name__)    
 
     # TODO: issue or warning or raise an exception when the inputs 
     # during training exceed the max_length provided here... 
+    tqdm.write("Setting up training run")
     config = SFTConfig(
         # NOTE: From the documentation - SFTTrainer always truncates by default the 
         # sequences to the max_length argument of the SFTConfig. If none is passed, 
         # the trainer will retrieve that value from the tokenizer. Some tokenizers 
         # do not provide a default value, so there is a check to retrieve the minimum
         # between 1024 and that value. Make sure to check it before training.
-        max_length=512, 
-        output_dir="runs", 
+        output_dir="runs",         
         num_train_epochs=epochs, 
         max_steps=max_steps, 
         per_device_train_batch_size=batch_size,
         eval_strategy="steps", 
-        report_to="tensorboard"
+        report_to="tensorboard",         
+        **config_args
     )
     
     # TODO: consider recruiting unsloth here to reduce memory usage and accelerate training ... 
@@ -71,6 +82,9 @@ def sft(dataset, model="facebook/opt-350m", batch_size=8, max_steps=-1, epochs=1
         ) 
 
     tqdm.write("Initiating training run.")
+    
+    # Support keyboard interrupts during training, yet still cough up some 
+    # stats on the run to help assess efficiency, etc... 
     try: 
         trainer.train()
         tqdm.write('Training complete!')
@@ -139,10 +153,13 @@ def train(dataset_path, model_path, batch_size=8, steps=None, epochs=1):
     sft_dataset = build_sft_dataset(dataset) 
 
     test_train_ratio = 0.1
-    tqdm.write(f"Holding {test_train_ratio}% out for validation...")    
+    tqdm.write(f"Holding {test_train_ratio*100}% out for validation...")    
     sft_dataset = sft_dataset.train_test_split(test_size=test_train_ratio)
 
-    model, summary = sft(sft_dataset, path=model_path, batch_size=batch_size, max_steps=steps, epochs=epochs)    
+    model, summary = sft(
+        dataset=sft_dataset, 
+        model="Qwen/Qwen2.5-0.5B-Instruct",
+        path=model_path, batch_size=batch_size, max_steps=steps, epochs=epochs)    
     tqdm.write(summary)
 
     # TODO: add a sanity check to validate the model's sequence length and flag any 
@@ -150,10 +167,11 @@ def train(dataset_path, model_path, batch_size=8, steps=None, epochs=1):
     tqdm.write("Supervised fine-tuning complete!") 
 
     if model != None: 
-        dpo_dataset = build_dpo_dataset(dataset)
-        model = dpo(dataset=dpo_dataset, model=model)
+        #dpo_dataset = build_dpo_dataset(dataset)
+        #model = dpo(dataset=dpo_dataset, model=model)
 
-        tqdm.write("DPO complete!") 
+        #tqdm.write("DPO complete!") 
+        pass
 
 def test(dataset):
     pass
