@@ -2,7 +2,7 @@ import time
 import gradio as gr
 import os
 from huggingface_hub import InferenceClient
-from transformers import AutoModelForCausalLM, OPTForCausalLM, AutoTokenizer, TextIteratorStreamer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 import torch 
 
 """
@@ -14,72 +14,28 @@ model_dir = "models"
 token = os.getenv('HF_MODEL_TOKEN') 
 print("Using token: ", token)
 
-# HF infra 
-client = InferenceClient("Qwen/Qwen2.5-0.5B-Instruct", token=token)
+# HF infra baseline
+qwen_model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+base_client = InferenceClient(qwen_model_id, token=token)
 
-# Local OPT
-base_model = OPTForCausalLM.from_pretrained("facebook/opt-350m")
-device = "cuda"
-base_model.to(device)
-
-base_tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
-streamer = TextIteratorStreamer(base_tokenizer, skip_prompt=True)
-
-# Local Qwen2.5
+# Local Qwen2.5 variant 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-base_model2 = AutoModelForCausalLM.from_pretrained(
-    model_name,
+tuned_model_file = "models/1july0732/"
+tuned_model = AutoModelForCausalLM.from_pretrained(
+    tuned_model_file,
     torch_dtype="auto",
-    device_map="auto"
+    device_map="auto", 
+    local_files_only=True
 )
-base_tokenizer2 = AutoTokenizer.from_pretrained(model_name, skip_special_tokens=True)
-streamer2 = TextIteratorStreamer(base_tokenizer2, skip_prompt=True, skip_special_tokens=True)
-
-        
-# TODO: something about the way the respond message is being used with both models here is 
-# causing feedback ... the model's chats are being reflected back and then we're hitting
-# the token generation limit... not ideal. 
-def respond_opt(
-    message,
-    history: list[tuple[str, str]],
-    system_message,
-    max_tokens,
-    temperature,
-    top_p,
-):
-    """
-    Gradio ChatInterface callback, which copmlies with the expected footprint and accepts 
-    the outputs of a few other Gradio components. From the docs on ChatInterface: 
-        Normally (assuming `type` is set to "messages"), the function should accept two parameters: 
-        - a `str` representing the input message and 
-        -`list` of openai-style dictionaries: 
-            {
-                "role": "user" | "assistant", 
-                "content": `str` | {"path": `str`
-            } | `gr.Component`} 
-        representing the chat history. The function should return/yield a `str` (for a simple
-        message), a supported Gradio component (e.g. gr.Image to return an image), a `dict` 
-        (for a complete openai-style message response), or a `list` of such messages.
-
-    """
-
-    input = base_tokenizer([message], return_tensors="pt").to(device)
-    ids = base_model.generate(**input, max_new_tokens=max_tokens, temperature=temperature, do_sample=False, streamer=streamer)
-    
-    response = ""
-
-    for token in streamer: 
-        response += token
-        yield response
+qwen_tokenizer = AutoTokenizer.from_pretrained(qwen_model_id, skip_special_tokens=True)
+streamer = TextIteratorStreamer(qwen_tokenizer, skip_prompt=True, skip_special_tokens=True)       
 
 def respond_qwen(message,
     history: list[tuple[str, str]],
     system_message,
     max_tokens,
-    temperature,
-    top_p,
+    temperature
 ):
 
     # Two things here... can we omit the explicit tokenizer call and what happens when we change the message 
@@ -90,30 +46,29 @@ def respond_qwen(message,
     messages.extend(history)
     messages.append({"role": "user", "content": message})
 
-    text = base_tokenizer2.apply_chat_template(
+    text = qwen_tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True
     )
-    model_inputs = base_tokenizer2([text], return_tensors="pt").to(base_model2.device)
+    model_inputs = qwen_tokenizer([text], return_tensors="pt").to(tuned_model.device)
 
-    ids = base_model2.generate(**model_inputs,max_new_tokens=max_tokens, temperature=temperature, streamer=streamer2)
+    tuned_model.generate(**model_inputs,max_new_tokens=max_tokens, temperature=temperature, streamer=streamer)
     
     response = ""    
-    for text in streamer2: 
+    for text in streamer: 
         if text != "":             
             response += text
             yield response
             # We are synchronous here, but simulate some typing to keep things satisfying. 
             time.sleep(0.02)
 
-def respond(
+def respond_base(
     message,
     history: list[tuple[str, str]],
     system_message,
     max_tokens,
-    temperature,
-    top_p,
+    temperature
 ):
     messages = [{"role": "system", "content": system_message}]
     messages.extend(history)
@@ -121,7 +76,7 @@ def respond(
 
     response = ""
 
-    for message in client.chat_completion(
+    for message in base_client.chat_completion(
         messages,
         max_tokens=max_tokens,
         stream=True,
@@ -139,11 +94,13 @@ def app():
     demo = gr.Blocks()
     with demo: 
         gr.Markdown(value="# ⚙️ Welcome!")
+        chat_input = gr.Textbox() 
         with gr.Row():
             with gr.Column(): 
                 gr.ChatInterface(
                     title="Qwen2.5-Instruct 0.5b",
-                    fn=respond_qwen,
+                    fn=respond_base,
+                    textbox=chat_input, 
                     additional_inputs=[
                         gr.Textbox(value="You are a friendly Chatbot.", label="System message"),
                         gr.Slider(minimum=1, maximum=2048, value=512, step=1, label="Max new tokens"),
@@ -153,14 +110,14 @@ def app():
             with gr.Column(): 
                 gr.ChatInterface(
                     title="Qwen2.5-Instruct 0.5b Linux-tuned",
-                    fn=respond_opt,
+                    fn=respond_qwen,
+                    textbox=chat_input, 
                     additional_inputs=[
                         gr.Textbox(value="You are a friendly Chatbot.", label="System message"),
                         gr.Slider(minimum=1, maximum=2048, value=512, step=1, label="Max new tokens"),
                         gr.Slider(minimum=0.1, maximum=4.0, value=0.7, step=0.1, label="Temperature")
                     ],
-                    type="messages") 
-        
+                    type="messages")         
         demo.launch(share=False)
 
 if __name__ == "__main__":
