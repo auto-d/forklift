@@ -1,11 +1,14 @@
+import signal
+import sys
 import os
 import asyncio 
 import tempfile 
 import json 
 import pandas as pd
 import time 
+from httpx import RequestError, TimeoutException
 from tqdm import tqdm
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 from process import run_subprocess
 
 class CodebaseAnalyzer(): 
@@ -42,6 +45,7 @@ class CodebaseAnalyzer():
                     raise ValueError("Unexpected backend type!")
                 
         self.backends = backends
+        self.exit = False
         self.usage = []
         
 
@@ -61,10 +65,10 @@ class CodebaseAnalyzer():
         """
 
         if self.defs != None and refresh == False: 
-            print("Found existing symbol definition table, aborting definition extraction!")
+            tqdm.write("Found existing symbol definition table, aborting definition extraction!")
             return  
 
-        print(f"Extracting symbols from {self.input_dir}..")
+        tqdm.write(f"Extracting symbols from {self.input_dir}..")
 
         ctags_file = tempfile.mkstemp()[1]
         cmd = [
@@ -90,7 +94,7 @@ class CodebaseAnalyzer():
         # streamline the ingest into a dataframe
         data = []
         with open(ctags_file, "r") as tag_file: 
-            for line in tag_file: 
+            for line in tqdm(tag_file): 
                 data.append(json.loads(line))
 
         os.remove(ctags_file)
@@ -106,7 +110,7 @@ class CodebaseAnalyzer():
         self.defs['line'] = self.defs['line'].fillna(0).astype(int)
         self.defs.fillna('', inplace=True)
 
-        print (f"Extracted {len(self.defs)} definitions.")
+        tqdm.write(f"Extracted {len(self.defs)} definitions.")
 
     def parse_cscope_lines(self, lines): 
         """
@@ -159,12 +163,10 @@ class CodebaseAnalyzer():
 
         if self.cscope_indexed == False or refresh == True:             
         
-            print (f"Extracting symbol references for {symbol}...")
-
             cscope_listing_file = tempfile.mkstemp()[1]
 
             # cscope wants a newline-separate list of files, oblige 
-            print("Gathering input files...")
+            tqdm.write("Gathering input files...")
             cmd = [
                 'find',
                 self.input_dir,
@@ -183,7 +185,14 @@ class CodebaseAnalyzer():
             result, files = run_subprocess(cmd, output_file=cscope_listing_file)
 
             # Now build the indices for all associated definitions    
-            print("Preparing cscope indices... ")
+            # NOTE: cscope is going to emit its indices in the working dir 
+            # dir, which will get steamrolled if we try to build another dataset 
+            # concurrently. Essentially the new index invalidates all of the planned 
+            # lookups for the job that created the overwritten indices. See this
+            # gpt-4o discussion regarding a symlink-based solution since cscope doesn't 
+            # allow changing the index locations (relative to CWD): 
+            # https://chatgpt.com/share/6862f22b-a42c-8013-af1f-6595d2aa648e
+            tqdm.write("Preparing cscope indices... ")
             cmd = [
                 'cscope', 
                 # Build listing only 
@@ -211,6 +220,8 @@ class CodebaseAnalyzer():
         # ../../../linux/init/do_mounts.c mount_nodev_root 346 static int __init mount_nodev_root(char *root_device_name)
         # ../../../linux/init/do_mounts.c mount_root 403 mount_nodev_root(root_device_name) == 0)
 
+        tqdm.write(f"Extracting symbol references for {symbol}...")
+
         result = {}
         result['symbol'] = symbol
         
@@ -229,14 +240,13 @@ class CodebaseAnalyzer():
         _, text = run_subprocess(["cscope", "-k", "-dL", self.CSCOPE_FIND_ASSIGNMENTS, symbol], output=True)
         result['asnmts'] = self.parse_cscope_lines(text) 
 
-        #print (f"Extracted {len(symbols)} definitions.")
         return {} if result['refs'] == '' else result
         
     def print_refs(self, refs): 
         if refs:                
             for key, value in refs.items(): 
                 #if key == 'symbol': 
-                #    print(f"{key}:{value}\n---------------------------")
+                #    tqdm.write(f"{key}:{value}\n---------------------------")
                 print(f"{key}:\n{value}")
 
     def build_symbol_map(self, defs, refs):
@@ -264,18 +274,37 @@ class CodebaseAnalyzer():
             messages.append({ "role": "user", "content": f"source search results:\n{context}" })
         messages.append({ "role": "user","content": message })
 
-        completion = await backend['client'].chat.completions.create(
-            model=backend['model'],
-            messages=messages,
-            temperature=temperature
-        )
+        # Default these in case of exception, we can look for any zeroed out tokens in the 
+        # usage later to determine how many API calls failed.  
+        in_tokens = 0
+        out_tokens = 0
+        response = ""
 
-        response = completion.choices[0].message.content
+        # Execute our completiong with some hopefully exhaustive error handling to avoid 
+        # a network or API issue from blowing up our dataset synthesis
+        # NOTE: error handling with help from gpt-4o: https://chatgpt.com/share/6862b54e-6298-8013-84fe-47893157bc29
+        try: 
+            completion = await backend['client'].chat.completions.create(
+                model=backend['model'],
+                messages=messages,
+                temperature=temperature
+            )
 
-        in_tokens = completion.usage.prompt_tokens
-        out_tokens = completion.usage.completion_tokens
-    
-        self.usage.append({'model':backend['model'],'in_tokens':in_tokens, 'out_tokens': out_tokens, 'time': time.time() - start})
+            response = completion.choices[0].message.content
+
+            in_tokens = completion.usage.prompt_tokens
+            out_tokens = completion.usage.completion_tokens
+        
+        except TimeoutException as e:
+            tqdm.write(f"Timeout: {e}")
+        except RequestError as e:
+            tqdm.write(f"Network error: {e}")
+        except OpenAIError as e:
+            tqdm.write(f"API error: {e}")
+        except Exception as e:
+            tqdm.write(f"Unexpected error: {e}")
+        finally: 
+            self.usage.append({'model':backend['model'],'in_tokens':in_tokens, 'out_tokens': out_tokens, 'time': time.time() - start})
         
         return response
 
@@ -333,6 +362,11 @@ class CodebaseAnalyzer():
         it's more about available compute. We'd really only realize a gain with openAI
         """
         tasks = []
+        
+        # NOTE: We are enforcing a sequential generation on the prompts that is constraining 
+        # our throughput... instead of iterating over the backends, we should just be putting 
+        # these tasks in an async queue and letting the next available worker/task (1-1 mapping 
+        # with available backens) complete the task and put it onto a result queue. 
         for backend in self.backends: 
             tasks.append(self.embellish_prompt_for_backend(x, context, backend))
 
@@ -449,130 +483,73 @@ class CodebaseAnalyzer():
         # ways... temperature, weaker models, system prompt variation, etc... we really need 
         # a graph at some point, but for now rely on the model to make the connections internally
         # between the web of symbols and their links outlined here
-        # TODO: go deeper on these questions once more source context is available... we really need to 
-        # toss entire functions into the context for the embellishing
-        # notably, implement the Q&A suggestions here: https://chatgpt.com/share/6860d282-ab3c-8013-89cc-7709cdf36bf7
-        # and don't forget to reference the conversation: 
-        # General Architecture and Design
-        # What is the overall architecture and modular structure of the Linux kernel?
-        # How are kernel subsystems organized in the source tree?
-        # What are the roles of the main directories like kernel/, arch/, drivers/, fs/, and net/?
-        # How does the Linux kernel handle hardware abstraction?
-        # What are the core components responsible for process and memory management?
-        # Build and Configuration
-        # How is the Linux kernel configured and built?
-        # What files control the kernel build process?
-        # How do Kconfig and Makefiles work together to configure the kernel build?
-        # How can one add or modify kernel configuration options?
-        # Kernel Initialization
-        # Where is the kernel’s entry point during system boot?
-        # How does the Linux kernel initialize hardware and drivers at startup?
-        # What is the role of the initramfs in kernel initialization?
-        # Process Management and Scheduling
-        # How does the kernel implement process scheduling?
-        # Where is the scheduler code located?
-        # What data structures represent processes or tasks?
-        # How are system calls handled and dispatched?
-        # Memory Management
-        # How does the kernel manage physical and virtual memory?
-        # What are the major components of the memory management subsystem?
-        # Where are page tables and virtual memory managed in the source?
-        # How does the kernel handle memory allocation and freeing?
-        # Device Drivers
-        # How are device drivers organized in the Linux kernel source?
-        # What is the structure of a typical device driver?
-        # How are drivers registered and initialized?
-        # How does the kernel communicate with hardware devices?
-        # Filesystems
-        # Where is the implementation of the Virtual Filesystem (VFS)?
-        # How are individual filesystem drivers implemented?
-        # How does the kernel handle mounting and unmounting filesystems?
-        # What mechanisms are used for caching and buffering filesystem data?
-        # Networking
-        # Where is the networking stack implemented?
-        # How does the kernel handle network protocols?
-        # How are network devices registered and managed?
-        # What is the role of the socket interface in the kernel?
-        # Synchronization and Concurrency
-        # How does the kernel handle synchronization between processes and interrupts?
-        # What locking primitives are available in the kernel?
-        # How does the kernel prevent deadlocks and race conditions?
-        # Debugging and Instrumentation
-        # What tools or mechanisms exist in the kernel for debugging?
-        # How are kernel logs and printk messages generated and managed?
-        # Where is support for tracing and performance monitoring implemented?
-        # Security
-        # How does the kernel enforce security policies?
-        # What subsystems are responsible for access control?
-        # How are capabilities and privileges managed?
-        # Kernel API and Internal Interfaces
-        # What are the main internal APIs for kernel modules?
-        # How can external modules interact with the kernel?
-        # What conventions are used for coding style and documentation?
-        # Versioning and Maintenance
-        # How is versioning handled within the kernel source?
-        # Where are changelogs or commit histories maintained?
-        # How are patches and contributions managed?
-        # Specific Questions about Source Files or Functions
-        # What is the purpose of init/main.c?
-        # How does schedule() function operate internally?
-        # Where is the implementation of do_fork() located?
-        # What is the role of the syscall_table?
+        # NOTE: other things to try ... 
+        # - implement recursive summarzation block-> function-> file -> directory -> parent ... 
+        # - implement grepping or tree-sitter extraction for contextual lines beyond the single identified line here 
+        #   e.g. grep_context = retrieve_context(file, line, size=5)
+        # - build a proper graph of calls and generate arbitrary questions about connections in that graph
+        # - here are some hastily-scrawled prompt generation calls based on a conversation with gpt-4o (see
+        #   https://chatgpt.com/share/6860d282-ab3c-8013-89cc-7709cdf36bf7): 
+        #     prompt_set += self.embellish_prompt(f"What is the purpose of {symbol} ?", context=grep_context) 
+        #     prompt_set += self.embellish_prompt(f"What roles does {symbol} have in the system?", context=grep_context) 
+        #     prompt_set += self.embellish_prompt(f"How is {symbol} relevant to the system architecture?", context=grep_context) 
+        #     prompt_set += self.embellish_prompt(f"How is the file {symbole} resides in organized ?", context=file-context) 
+        #     prompt_set += self.embellish_prompt(f"What other files and symbols are important in {symbol}'s subsystem?", context=file-list_context) 
+        #     prompt_set += self.embellish_prompt(f"What subsystem does {symbol} belong to?", context=grep_context) 
+        #     prompt_set += self.embellish_prompt(f"Is memory being managed by {symbol}?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"What dependencies does {symbol} have?) 
+        #     prompt_set += self.embellish_prompt(f"What happens if {symbol} is corrupted?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"Does {symbol} process network traffic?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"Is {symbol} associated with security policies?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"Does {symbol} assist with threading?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"Can {symbol} interact with user mode processes?", context=grep_context_all_refs) 
+        #     prompt_set += self.embellish_prompt(f"What APIs might be associated with {symbol}?", context=grep_context_all_refs) 
 
-        # Symbols    
-        sets.extend(self.embellish_prompt(f"What file is {symbol} defined in?", context=f"{kind} {symbol} {sig} found in file:{path} @ line {line}.")) 
-        #TODO: implement recursive summarzation block-> function-> file -> directory -> parent ... 
-        #TODO: implement grepping for contextual lines beyond the single identified line here 
-        #grep_context = retrieve_context(file, line, size=5)
-        #prompt_set += self.embellish_prompt(f"What is the purpose of {symbol} ?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"What roles does {symbol} have in the system?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"How is {symbol} relevant to the system architecture?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"How is the file {symbole} resides in organized ?", context=file-context) 
-        #prompt_set += self.embellish_prompt(f"What other files and symbols are important in {symbol}'s subsystem?", context=file-list_context) 
-        #prompt_set += self.embellish_prompt(f"What subsystem does {symbol} belong to?", context=grep_context) 
-        #prompt_set += self.embellish_prompt(f"Is memory being managed by {symbol}?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"What depenencies does {symbol} have?) 
-        #prompt_set += self.embellish_prompt(f"What happens if {symbol} is corrupted?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"Does {symbol} process network traffic?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"Is {symbol} associated with security policies?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"Does {symbol} assist with threading?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"Can {symbol} interact with user mode processes?", context=grep_context_all_refs) 
-        #prompt_set += self.embellish_prompt(f"What APIs might be associated with {symbol}?", context=grep_context_all_refs) 
+        with tqdm(total=6) as progress:
 
-        # Symbol References        
-        for ref in refs['refs']: 
-            # TODO: ref-specific prompts
-            pass 
+            # Symbols    
+            sets.extend(self.embellish_prompt(f"What file is {symbol} defined in?", context=f"{kind} {symbol} {sig} found in file:{path} @ line {line}.")) 
+            progress.update(1)
 
-        sets.extend(self.embellish_prompt(f"Where is the {symbol} referenced?", context=self.print_cscope_dicts(refs['refs']))) 
+            # Symbol References        
+            for ref in refs['refs']: 
+                # TODO: ref-specific prompts
+                pass 
 
-        # Symbol Definitions
-        for def_ in refs['defs']: 
-            # TODO: definition-specific prompts            
-            pass
-    
-        sets.extend(self.embellish_prompt(f"Where else is the {symbol} defined?", context=self.print_cscope_dicts(refs['defs']))) 
+            sets.extend(self.embellish_prompt(f"Where is the {symbol} referenced?", context=self.print_cscope_dicts(refs['refs']))) 
+            progress.update(1)
 
-        # Functions called from associated function's scope (if any)
-        for child in refs['children']:  
-            # TODO: child-specific...           
-            pass
+            # Symbol Definitions
+            for def_ in refs['defs']: 
+                # TODO: definition-specific prompts            
+                pass
+        
+            sets.extend(self.embellish_prompt(f"Where else is the {symbol} defined?", context=self.print_cscope_dicts(refs['defs']))) 
+            progress.update(1)
 
-        sets.extend(self.embellish_prompt(f"What functions does {symbol} call?", context=self.print_cscope_dicts(refs['children']))) 
+            # Functions called from associated function's scope (if any)
+            for child in refs['children']:  
+                # TODO: child-specific...           
+                pass
 
-        # Functions that call the associated function symbol (if any)
-        for parent in refs['parents']:
-            # TODO: parent specific prompts
-            pass
+            sets.extend(self.embellish_prompt(f"What functions does {symbol} call?", context=self.print_cscope_dicts(refs['children']))) 
+            progress.update(1)
 
-        sets.extend(self.embellish_prompt(f"What functions is {symbol} called by?", context=self.print_cscope_dicts(refs['parents'])))
-                                                                                                                        
-        # Assignment operations (if any)
-        for asnmt in refs['asnmts']:       
-            # TODO: assignment prompts..      
-            pass
+            # Functions that call the associated function symbol (if any)
+            for parent in refs['parents']:
+                # TODO: parent specific prompts
+                pass
 
-        sets.extend(self.embellish_prompt(f"Where are assignments made to {symbol}?", context=self.print_cscope_dicts(refs['asnmts'])))
+            sets.extend(self.embellish_prompt(f"What functions is {symbol} called by?", context=self.print_cscope_dicts(refs['parents'])))
+            progress.update(1)
+                                                                                                                            
+            # Assignment operations (if any)
+            for asnmt in refs['asnmts']:       
+                # TODO: assignment prompts..      
+                pass
+
+            sets.extend(self.embellish_prompt(f"Where are assignments made to {symbol}?", context=self.print_cscope_dicts(refs['asnmts'])))
+            progress.update(1)
 
         return pd.DataFrame(sets)
 
@@ -584,18 +561,26 @@ class CodebaseAnalyzer():
         self.dataset = pd.DataFrame()
 
         self.extract_symbol_defs()
-        for index, def_ in tqdm(self.defs.iterrows(), total=len(self.defs)): 
             
-            # Extract all refernces, assignments, etc... to this symbol and proceed 
-            # only if we've found one or more valid interactions w/ said symbol
-            refs = self.extract_symbol_refs(symbol=def_['name'])
-            if refs['refs']:
-                self.dataset = pd.concat([self.dataset, self.generate_symbol_prompts(def_, refs)])
+        # Allow a keyboard interrupt like ctrl+c to terminate teh generation, but 
+        # attempt to stop gracefully and return the dataset in its current state 
+        try:             
+            for index, def_ in tqdm(self.defs.iterrows(), total=len(self.defs)): 
+
+                # Extract all references, assignments, etc... to this symbol and proceed 
+                # only if we've found one or more valid interactions w/ said symbol
+                refs = self.extract_symbol_refs(symbol=def_['name'])
+                if refs['refs']:
+                    self.dataset = pd.concat([self.dataset, self.generate_symbol_prompts(def_, refs)])            
         
-        print(f"Dataset generated ({len(self.dataset)} rows)!")
+        except KeyboardInterrupt as interrupt: 
+            tqdm.write(f"Caught interrupt signal ({interrupt})... terminating dataset generation!")
+        
+        tqdm.write(f"Dataset generated ({len(self.dataset)} rows).")
                 
         usage = pd.DataFrame(self.usage).groupby('model').sum().reset_index()
-        print(f"Model usage:\n{usage}")
+        usage['tps'] = usage['out_tokens']/usage['time']
+        tqdm.write(f"Model usage:\n{usage}")
 
         return self.dataset
 
@@ -639,16 +624,22 @@ def build(input_dirs, openai_key, output_dir):
     # be represented in another a common parent directory should be passed. 
     # This implies we should do some housekeeping in the passed directories if
     # we don't want some of the contained code/dirs included in this analysis. 
-    for input_dir in tqdm(input_dirs): 
+    #
+    # NOTE: keyboard interrupts will stop the generation of each dataset, but not all 
+    # so if we find one input directory looks like it will take forever to process, we
+    # can ctrl + c to boot us to the next one
+    for input_dir in input_dirs: 
 
         backends = [
-            {'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'llama3.1:8b'},
+            #{'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'llama3.1:8b'},
+            #{'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'qwen2.5-coder:3b'},
             # This guy's a little too slow to participate in the larger campaign... 
             #{'type':'ollama', 'url': "http://10.0.0.37:11435/v1", 'model': 'qwen2.5-coder:3b'},
-            {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'}
+            #{'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'},
+            {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-nano'}
             ]
         
-        print("Generating dataset based on {input_dir}...")
+        tqdm.write(f"Generating dataset based on {input_dir}...")
 
         analyzer = CodebaseAnalyzer(input_dir, backends)
         dataset = analyzer.generate_dataset() 
@@ -657,9 +648,9 @@ def build(input_dirs, openai_key, output_dir):
         output_file = os.path.join(output_dir,f"{input_base}.parquet")
         dataset.to_parquet(output_file)
         
-        print(f"Wrote dataset for {input_dir} to {output_file}.")
+        tqdm.write(f"Wrote dataset for {input_dir} to {output_file}.")
     
-    print(f"Generation campaign complete!")
+    tqdm.write(f"Generation campaign complete!")
 
 def load_dataset(path): 
     """

@@ -4,19 +4,14 @@ Lift your understanding of any repo! 📦⬆
 
 ## TODO 
 
-- add error handling around completions, we can't bust the generation of the dataset if 
-- validate our completions -- they have to be high quality for this to work out!
-- find tensorboard traces asociated with model training
-  - ensure we can see both training and validation loss
+- update the deploy app to allow side-by-side interaction with the fine-tuned model
+- use the deploy automation to push the new model and the reference to HF spaces
 - decide on evaluation strategy ... 
-  - how is this not just 1) build a dataset 2) hold out some data 3) use the same scalar we use to power the RL function ... i.e. evaluation is just a measure of similarity between desired output and actual ... 
-    - BLEU is a problem, way too sensitive to evaluate the distanace between expected and provided output
     - Can we just use an embedding distance or angle here? perhaps cosine similarity to give us a better idea of how far off we are? -- we'll need to add embeddings to the dataset... compute at evaluation time or during generation? i
 - use a PEFT fine-tuning operation and see how things change WRT training time, VRAM, etc. 
-- figure out if we can accelerate the training with flash attention or flash attention 2 (see https://huggingface.co/docs/trl/sft_trainer#using-flash-attention-2)
-- identify a suitable dataset type and schema
-  - the SFTtrainer examples uses the stanfordnlp/imdb dataset, which is 25K rows of prompt/sentiment pairs
-- use a canned DPO operation to understand what we're up for in terms of time, RAM, etc... 
+
+- implement HMM model 
+- implement naive model ... bent's input...
 
 ## Problem 
 
@@ -56,7 +51,7 @@ Depending on the nature of the code and it's complexity, and the degree to which
   - ChatGPT 4.1 Nano [6]
   - Qwen 2.5 0.5B
 
-  
+- Resulting patterns imparted are a mix of knowledge mined out of models and links between all symbols in 
 ###
 
 ## Prior Efforts 
@@ -117,7 +112,7 @@ In [4], a 14-billion parameter code-specific models is the target of a reinforce
 3. Apply heuristics to generat
    - Apply a series of heuristics to generate prompts and reference information to pass to an LLM for completion
    - E.g. 
-     - prompt: 'What file is BUG defined in?'
+    - prompt: 'What file is BUG defined in?'
     - quality answer 1 (for SFT): 'The symbol `BUG` is defined in the `../../linux/init/Kconfig` file at line 1670.'
     - quality answer 2 (preferred DPO answer)): 'BUG is defined in `../../linux/init/Kconfig`.'
     - unpreferred answer (for DPO): 'The `BUG()` macro is defined in `<linux/bug.h>`.'
@@ -168,10 +163,51 @@ All testing done with Python 3.12
 `--test`
 `--deploy` : requires HF_TOKEN environment variable to be set. This can be manually exported or alternatively,  is implicit after a `huggingface-cli login` completes. 
 
+### Building a Dataset
+
+Below is an example run that emits a synthetic fine-tuning dataset for the `init` subsystem of the Linux kernel. Here we are running a local model and an openAI model in parallel to generate completions. 4K samples with sepearate completions for SFT and DPO took about 7 hours.
+
+```
+forklift build --inputs linux/init --dataset ./data/30june0116
+Extracting symbols from linux/init..
+Extracted 1087 definitions.
+Gathering input files...
+Preparing cscope indices... 
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1087/1087 [6:51:14<00:00, 22.70s/it]
+Dataset generated (4332 rows)!
+Model usage:
+          model  in_tokens  out_tokens          time
+0  gpt-4.1-mini    2140116      993414  24558.816467
+1   llama3.1:8b    2282488     1078927  11763.533077
+Wrote dataset for linux/init to ./data/30june0116/init.parquet.
+Generation campaign complete!
+```
 
 ```
 usage: forklift train [-h] --dataset DATASET --model_dir MODEL_DIR [--nn_steps NN_STEPS] [--nn_epochs NN_EPOCHS] [--type {naive,classic,neural}]
 ```
+
+
+
+```
+Model usage:
+          model  in_tokens  out_tokens        time        tps
+0  gpt-4.1-mini      11504        6668  150.910258  44.185200
+1  gpt-4.1-nano      11297        5508  136.195672  40.441814
+2   llama3.1:8b      13748        7557   99.836880  75.693471
+```
+Above configuration was estimated to take `259:28:49` hours (10 days!) -- the token rate is sort of less than expected. 
+
+Model usage:
+              model  in_tokens  out_tokens        time         tps
+0      gpt-4.1-nano      15240        7500  157.736843   47.547547
+1  qwen2.5-coder:3b      20788       12170  104.064007  116.947255
+
+Dataset generated (3732 rows).
+Model usage:
+          model  in_tokens  out_tokens          time        tps
+0  gpt-4.1-nano    4291928     1542930  26757.451113  57.663564
+
 
 **Visualizing Training Loss** 
 

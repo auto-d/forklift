@@ -19,7 +19,9 @@
             "request": "launch",
             "program": "main.py",
             "console": "integratedTerminal", 
-            "args": ["train","--dataset","./data/test/init.parquet","--model","./models/test","--nn_steps","10"],
+            //"args": ["train","--dataset","./data/test/init.parquet","--model","./models/test","--nn_steps","10"],
+            //"args": ["train","--dataset","data/30june0116/init.parquet","--model","./models/test","--nn_epochs","1"],
+            "args": ["train","--dataset","data/30june0116/init.parquet","--model","./models/test","--nn_steps","20"],
             "justMyCode": false
         },
         {
@@ -38,6 +40,14 @@
             "program": "main.py",
             "console": "integratedTerminal", 
             "args": ["deploy","--model", "./models.base.xyz", "--refresh"],
+            "justMyCode": false
+        }, 
+        {
+            "name": "Python Debugger: Gradio",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "demo/app.py",
+            "console": "integratedTerminal", 
             "justMyCode": false
         }
 
