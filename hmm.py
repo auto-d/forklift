@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import random 
 import os
 import numpy as np
@@ -7,8 +8,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 import pickle
 import string 
 import spacy
-from nltk.hmm import HiddenMarkovModelTrainer
-from naive import tokenize, clean, lemmatize
+import nltk
+from naive import tokenize, clean, lemmatize, similarity
 
 class HmmEstimator(BaseEstimator): 
     
@@ -17,16 +18,8 @@ class HmmEstimator(BaseEstimator):
         Set up an instance of our hidden markov model estimator 
         """
         self.model = None
+        self.nlp = spacy.load("en_core_web_sm")
 
-    def similarity(a, b): 
-        """
-        Return pairwise similarity between elements in passed arrays
-        """
-        similarity_matrix = cosine_similarity(a,b)
-        pairwise_similarity = np.diag(similarity_matrix)
-
-        return pairwise_similarity
-    
     def intersect_symbols(symbols, text):
         """
         Find kernel symbols that are present in provided text
@@ -42,15 +35,37 @@ class HmmEstimator(BaseEstimator):
     def fit(self, X, y): 
         """
         Fit our HMM estimator to supplied inputs/outputs
+
+        NOTE: Help from: 
+         - https://www.nltk.org/howto/probability.html
+         - https://stackoverflow.com/questions/8941269/initialize-hiddenmarkovmodeltrainer-object
         """ 
         # We'll train our HMM to predict words across the sequences
-        seqs = list(df['x'] + df['y'])
+        seqs = list(X + y)
         
+        tqdm.write(f"Building reference data... ")
         data = []
-        for seq in seqs: 
-           data.append(lemmatize(clean(tokenize(seq))))
+        vocabulary = []
+        for seq in tqdm(seqs): 
+            for token in self.nlp(seq):
+                datum = []
+                if not token.is_stop and not token.is_punct: 
+                    vocabulary.append(token.text.lower())
+                    datum.append([token.text.lower(), token.tag_])
+                if len(datum) > 0: 
+                    data.append(datum)
 
-        self.model = nltk.hmm.HiddenMarkovModelTrainer().train(unlabeled_sequences=data)
+        all_tags = self.nlp.get_pipe("tagger").labels
+
+        tqdm.write(f"Fitting HMM model...")
+        
+        # Symbols int he HMM parlance is a set of our vocabulary 
+        # States are the number of internal states which we can't 
+        # see... hence the 'hidden' bit
+        trainer = nltk.hmm.HiddenMarkovModelTrainer(
+            all_tags, 
+            symbols=nltk.unique_list(vocabulary))
+        self.model = trainer.train_supervised(data)
 
         return self
 
@@ -58,9 +73,11 @@ class HmmEstimator(BaseEstimator):
         """
         Generate an answer given a prompt/input/question
         """
-        for x in X: 
+        preds = []
+        tqdm.write(f"Running predictions...")
+        for x in tqdm(list(X)): 
             state = self.model.best_path(lemmatize(clean(tokenize(x))))
-            self.model.random_sample(random.Random(), 100)
+            preds.append(self.model.random_sample(random.Random(), 100))
         
         return preds 
     
@@ -71,14 +88,9 @@ class HmmEstimator(BaseEstimator):
         y_hat = self.predict(X)
 
         scores = []
-        for a, b in zip (y, y_hat): 
+        tqdm.write(f"Scoring predictions...")
+        for a, b in tqdm(zip(y, y_hat), total=len(y)): 
             scores.append(self.similarity(a, b)) 
-
-    # Evaluate the tagger on the test data
-    test_accuracy = hmm_tagger.evaluate(test_data)
-
-    print(f"Test accuracy: {test_accuracy:.2f}")
-    return test_accuracy
 
         return scores
 
@@ -89,7 +101,7 @@ def load_dataset(file):
     df = pd.read_parquet(file)
     return df['x'], df['y']
 
-def save_model(model:NaiveEstimator, path):
+def save_model(model, path):
     """
     Save the model to a file
     NOTE: copy/pasta from vision project 
@@ -113,7 +125,7 @@ def load_model(path):
     with open(filename, 'rb') as f: 
         model = pickle.load(f) 
     
-    if type(model) != NaiveEstimator: 
+    if type(model) != HmmEstimator: 
         raise ValueError(f"Unexpected type {type(model)} found in {filename}")
 
     return model
@@ -131,6 +143,7 @@ def test(model_dir, dataset):
     """
     Test the hmm model 
     """
-    X, _ = load_dataset(dataset)
+    X, y = load_dataset(dataset)
     model = load_model(model_dir)    
-    score = model.score(X)
+    scores = model.score(X, y)
+    tqdm.write(f"Hidden Markov model mean scores for the provided dataset: {np.mean(scores)}")
