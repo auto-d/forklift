@@ -119,6 +119,7 @@ def router():
     # Test mode 
     test_parser = subparsers.add_parser("test") 
     test_parser.add_argument("--model_dir", type=readable_dir, help="Directory to load model from")
+    test_parser.add_argument("--dataset", type=readable_file, help="Dataset to test model on")
     test_parser.add_argument("--type", choices=['naive', 'classic', 'neural'], default='neural')
 
     # Deploy mode 
@@ -148,11 +149,11 @@ def router():
 
         case "test":
             if args.type == 'naive':
-                naive.test(args.dataset)
+                naive.test(args.model_dir, args.dataset)
             if args.type == 'classic':
-                hmm.test(args.dataset) 
+                hmm.test(args.model_dir, args.dataset) 
             if args.type == 'neural': 
-                slm.test(args.dataset)
+                slm.test(args.model_dir, args.dataset)
 
         case "deploy":            
             if hf_token: 
