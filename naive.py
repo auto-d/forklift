@@ -62,7 +62,7 @@ def similarity(a, b):
     similarity_matrix = cosine_similarity([embed(a)],[embed(b)])
     pairwise_similarity = np.diag(similarity_matrix)[0]
 
-    return pairwise_similarity
+    return float(pairwise_similarity)
 
 class NaiveEstimator(BaseEstimator): 
     
@@ -187,4 +187,5 @@ def test(model_dir, dataset):
     X, y = load_dataset(dataset)
     model = load_model(model_dir)    
     scores = model.score(X, y)
-    tqdm.write("Naive model scores for the provided dataset: ", scores)
+    tqdm.write("Naive model scores for the provided dataset: ")
+    tqdm.write(str(scores))
