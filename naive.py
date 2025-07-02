@@ -40,14 +40,17 @@ def lemmatize(tokens):
 
     return tokens 
 
+# We just leave this floating in space to avoid creating the client a thousand times
+# each eval. Should migrate to a class, but here we are. 💃
+client = OpenAI(api_key="none", base_url="http://localhost:11434/v1")
+
 def embed(text): 
     """
     Generate a text embedding for the input sequence using our trusty ollama 
     nomin embedding model 
 
     NOTE: snippet from https://platform.openai.com/docs/guides/embeddings
-    """
-    client = OpenAI(api_key="none", base_url="http://localhost:11434/v1")
+    """    
     response = client.embeddings.create(model="nomic-embed-text:latest", input=text)
     return response.data[0].embedding
 
@@ -55,7 +58,7 @@ def similarity(a, b):
     """
     Return pairwise similarity between elements in passed arrays
     """
-    similarity_matrix = cosine_similarity(embed(a),embed(b))
+    similarity_matrix = cosine_similarity([embed(a)],[embed(b)])
     pairwise_similarity = np.diag(similarity_matrix)
 
     return pairwise_similarity
@@ -109,7 +112,7 @@ class NaiveEstimator(BaseEstimator):
         for x in X: 
             for ins, outs in self.model["mapping"]: 
                 symbols = self.intersect_symbols(self.model["symbols"], x)
-                preds = "".join(outs) if symbols == ins else []
+                preds.append("".join(outs) if symbols == ins else "")
 
         return preds 
     
@@ -119,7 +122,6 @@ class NaiveEstimator(BaseEstimator):
         """        
         y_hat = self.predict(X)
 
-        #TODO: whoops, these are sequences... need to embed and compare 
         scores = []
         for a, b in zip (y, y_hat): 
             scores.append(similarity(a, b)) 
@@ -178,5 +180,5 @@ def test(model_dir, dataset):
     """
     X, y = load_dataset(dataset)
     model = load_model(model_dir)    
-    score = model.score(X, y)
-    print()
+    scores = model.score(X, y)
+    print("Naive model scores for the provided dataset: ", scores)
