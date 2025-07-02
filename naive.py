@@ -117,7 +117,7 @@ class NaiveEstimator(BaseEstimator):
         for x in tqdm(list(X), total=len(X)): 
             for ins, outs in self.model["mapping"]: 
                 symbols = self.intersect_symbols(self.model["symbols"], x)
-                preds.append("".join(outs) if symbols == ins else "")
+                preds.append(" ".join(outs) if symbols == ins else "")
 
         return preds 
     

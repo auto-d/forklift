@@ -46,14 +46,14 @@ class HmmEstimator(BaseEstimator):
         tqdm.write(f"Building reference data... ")
         data = []
         vocabulary = []
-        for seq in tqdm(seqs): 
-            for token in self.nlp(seq):
-                datum = []
+        for seq_in in tqdm(seqs): 
+            seq_out = []
+            for token in self.nlp(seq_in):                
                 if not token.is_stop and not token.is_punct: 
                     vocabulary.append(token.text.lower())
-                    datum.append([token.text.lower(), token.tag_])
-                if len(datum) > 0: 
-                    data.append(datum)
+                    seq_out.append((token.text.lower(), token.tag_))
+            if len(seq_out) > 1: 
+                data.append(seq_out)
 
         all_tags = self.nlp.get_pipe("tagger").labels
 
@@ -77,7 +77,9 @@ class HmmEstimator(BaseEstimator):
         tqdm.write(f"Running predictions...")
         for x in tqdm(list(X)): 
             state = self.model.best_path(lemmatize(clean(tokenize(x))))
-            preds.append(self.model.random_sample(random.Random(), 100))
+            tokens_n_tags = self.model.random_sample(random.Random(), 50)
+            tokens = [a[0] for a in tokens_n_tags]
+            preds.append(" ".join(tokens))
         
         return preds 
     
@@ -90,9 +92,22 @@ class HmmEstimator(BaseEstimator):
         scores = []
         tqdm.write(f"Scoring predictions...")
         for a, b in tqdm(zip(y, y_hat), total=len(y)): 
-            scores.append(self.similarity(a, b)) 
+            scores.append(similarity(a, b)) 
 
         return scores
+    
+    def get_state(self): 
+        model_data = {
+            # "symbols": self.model._symbols,
+            # "states": self.model._states,
+            # "transitions": self.model._transitions,
+            # "outputs": self.model._outputs,
+            # "priors": self.model._priors,
+        }
+        return model_data
+    
+    def put_state(self, model_data):
+        self.model = nltk.hmm.HiddenMarkovModelTagger(**model_data)
 
 def load_dataset(file): 
     """
@@ -104,11 +119,15 @@ def load_dataset(file):
 def save_model(model, path):
     """
     Save the model to a file
-    NOTE: copy/pasta from vision project 
+    NOTE: needed gpt-4os help to figure out how to save the model since
+    it's keeping someinternal lambda funcs we can't persist, see: 
+    https://chatgpt.com/share/68658ba9-d938-8013-84d2-0d49cbdf5052
     """    
     filename = os.path.join(path, 'hmm.pkl')
-    with open(filename, 'wb') as f: 
-        pickle.dump(model, f)
+
+    with open(filename, 'wb') as f:         
+        state = model.get_state()
+        pickle.dump(state, f)
     
     print (f"Model saved to {path}")
 
@@ -123,7 +142,9 @@ def load_model(path):
 
     filename = os.path.join(path, 'hmm.pkl')
     with open(filename, 'rb') as f: 
-        model = pickle.load(f) 
+        model_data = pickle.load(f) 
+        model = HmmEstimator()
+        model.put_state(model_data)
     
     if type(model) != HmmEstimator: 
         raise ValueError(f"Unexpected type {type(model)} found in {filename}")
@@ -137,13 +158,21 @@ def train(dataset, model_dir):
     
     X, y  = load_dataset(dataset)
     model = HmmEstimator().fit(X, y)
-    save_model(model, model_dir)
+    
+    # NOTE: the NLTK code for the estimator is getting crusty, I can't figure out 
+    # how to save the model... neither it nor it's critical properties are picklable, 
+    # so essentially need to run testing concurrently (can't be separate CLI calls)
+    #                                                  
+    #save_model(model, model_dir)
 
-def test(model_dir, dataset):
+    test(model, "data/ipc/ipc.parquet")
+
+def test(model, dataset):
     """
     Test the hmm model 
     """
     X, y = load_dataset(dataset)
-    model = load_model(model_dir)    
+    # See comment in train() above
+    # model = load_model(model_dir)    
     scores = model.score(X, y)
     tqdm.write(f"Hidden Markov model mean scores for the provided dataset: {np.mean(scores)}")
