@@ -9,6 +9,7 @@ import string
 import spacy
 import nltk
 from dataset import CodebaseAnalyzer
+from openai import OpenAI
 
 def tokenize(text):
     """
@@ -23,7 +24,7 @@ def clean(tokens):
 
     Adapted from https://github.com/AIPI540/AIPI540-Deep-Learning-Applications/blob/main/3_nlp/text_preprocessing.ipynb
     """
-    nltk.corpus.stopwords.words('english')
+    stop_words = set(nltk.corpus.stopwords.words('english'))
     punctuations = string.punctuation
 
     tokens = [w for w in tokens if w.lower() not in stop_words and w not in punctuations]
@@ -39,6 +40,26 @@ def lemmatize(tokens):
 
     return tokens 
 
+def embed(text): 
+    """
+    Generate a text embedding for the input sequence using our trusty ollama 
+    nomin embedding model 
+
+    NOTE: snippet from https://platform.openai.com/docs/guides/embeddings
+    """
+    client = OpenAI(api_key="none", base_url="http://localhost:11434/v1")
+    response = client.embeddings.create(model="nomic-embed-text:latest", input=text)
+    return response.data[0].embedding
+
+def similarity(a, b): 
+    """
+    Return pairwise similarity between elements in passed arrays
+    """
+    similarity_matrix = cosine_similarity(embed(a),embed(b))
+    pairwise_similarity = np.diag(similarity_matrix)
+
+    return pairwise_similarity
+
 class NaiveEstimator(BaseEstimator): 
     
     def __init__(self):
@@ -46,24 +67,14 @@ class NaiveEstimator(BaseEstimator):
         Set up an instance of our naive estimator 
         """
         self.model = None
-
-    def similarity(a, b): 
-        """
-        Return pairwise similarity between elements in passed arrays
-        """
-        similarity_matrix = cosine_similarity(a,b)
-        pairwise_similarity = np.diag(similarity_matrix)
-
-        return pairwise_similarity
     
-    def intersect_symbols(symbols, text):
+    def intersect_symbols(self, symbols, tokens):
         """
         Find kernel symbols that are present in provided text
         """
-        words = text.split()
         matches = set()
         for symbol in symbols: 
-            if symbol in words: 
+            if symbol.lower() in tokens: 
                 matches.add(symbol)
 
         return matches
@@ -72,19 +83,20 @@ class NaiveEstimator(BaseEstimator):
         """
         Fit our naive estimator to a set of prompts
         """ 
-        self.analyzer = CodebaseAnalyzer('linux')
+        self.analyzer = CodebaseAnalyzer('linux/init')
         self.analyzer.extract_symbol_defs()
         
-        symbols = list(self.analyzer.defs['name']) 
+        symbols = set(self.analyzer.defs['name']) 
 
         self.model = { 
-            "symbols": symbols
+            "symbols": symbols, 
             "mapping" : []
             }
-        for x, y in zip(X.x, y.y)
-            ins = self.intersect_symbols(symbols, x) 
-            outs = self.intersect_symbols(symbols, y)
-            model["mapping"].append((ins,outs))
+        
+        for x, y in zip(X, y):
+            ins = self.intersect_symbols(symbols, lemmatize(clean(tokenize(x)))) 
+            outs = self.intersect_symbols(symbols, lemmatize(clean(tokenize(y))))
+            self.model["mapping"].append((ins,outs))
             break 
 
         return self
@@ -97,7 +109,7 @@ class NaiveEstimator(BaseEstimator):
         for x in X: 
             for ins, outs in self.model["mapping"]: 
                 symbols = self.intersect_symbols(self.model["symbols"], x)
-                preds = list(outs) if symbols == ins else []
+                preds = "".join(outs) if symbols == ins else []
 
         return preds 
     
@@ -107,9 +119,10 @@ class NaiveEstimator(BaseEstimator):
         """        
         y_hat = self.predict(X)
 
+        #TODO: whoops, these are sequences... need to embed and compare 
         scores = []
         for a, b in zip (y, y_hat): 
-            scores.append(self.similarity(a, b)) 
+            scores.append(similarity(a, b)) 
 
         return scores
 
@@ -120,12 +133,13 @@ def load_dataset(file):
     df = pd.read_parquet(file)
     return df['x'], df['y']
 
-def save_model(model:NaiveEstimator, path):
+def save_model(model, path):
     """
     Save the model to a file
     NOTE: copy/pasta from vision project 
     """    
     filename = os.path.join(path, 'naive.pkl')
+
     with open(filename, 'wb') as f: 
         pickle.dump(model, f)
     
@@ -162,6 +176,7 @@ def test(model_dir, dataset):
     """
     Test the naive model 
     """
-    X, _ = load_dataset(dataset)
+    X, y = load_dataset(dataset)
     model = load_model(model_dir)    
-    score = model.score(X)
+    score = model.score(X, y)
+    print()
