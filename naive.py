@@ -1,4 +1,5 @@
 import os
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator 
@@ -59,7 +60,7 @@ def similarity(a, b):
     Return pairwise similarity between elements in passed arrays
     """
     similarity_matrix = cosine_similarity([embed(a)],[embed(b)])
-    pairwise_similarity = np.diag(similarity_matrix)
+    pairwise_similarity = np.diag(similarity_matrix)[0]
 
     return pairwise_similarity
 
@@ -86,7 +87,10 @@ class NaiveEstimator(BaseEstimator):
         """
         Fit our naive estimator to a set of prompts
         """ 
-        self.analyzer = CodebaseAnalyzer('linux/init')
+        subsystem = 'ipc'
+        tqdm.write(f"Analyzing subsystem {subsystem.upper()}...")
+
+        self.analyzer = CodebaseAnalyzer(f"linux/{subsystem}")
         self.analyzer.extract_symbol_defs()
         
         symbols = set(self.analyzer.defs['name']) 
@@ -96,12 +100,12 @@ class NaiveEstimator(BaseEstimator):
             "mapping" : []
             }
         
-        for x, y in zip(X, y):
+        tqdm.write(f"Building symbol intersections over training data")
+        for x, y in tqdm(zip(X, y), total=len(X)):
             ins = self.intersect_symbols(symbols, lemmatize(clean(tokenize(x)))) 
             outs = self.intersect_symbols(symbols, lemmatize(clean(tokenize(y))))
             self.model["mapping"].append((ins,outs))
-            break 
-
+        
         return self
 
     def predict(self, X) -> np.ndarray: 
@@ -109,7 +113,8 @@ class NaiveEstimator(BaseEstimator):
         Generate an answer given a prompt/input/question
         """
         preds = []
-        for x in X: 
+        tqdm.write(f"Running predictions... ")
+        for x in tqdm(list(X), total=len(X)): 
             for ins, outs in self.model["mapping"]: 
                 symbols = self.intersect_symbols(self.model["symbols"], x)
                 preds.append("".join(outs) if symbols == ins else "")
@@ -123,7 +128,8 @@ class NaiveEstimator(BaseEstimator):
         y_hat = self.predict(X)
 
         scores = []
-        for a, b in zip (y, y_hat): 
+        tqdm.write(f"Scoring predictions...")
+        for a, b in tqdm(zip(y, y_hat), total=len(y)): 
             scores.append(similarity(a, b)) 
 
         return scores
@@ -145,7 +151,7 @@ def save_model(model, path):
     with open(filename, 'wb') as f: 
         pickle.dump(model, f)
     
-    print (f"Model saved to {path}")
+    tqdm.write(f"Model saved to {path}")
 
     return filename
 
@@ -181,4 +187,4 @@ def test(model_dir, dataset):
     X, y = load_dataset(dataset)
     model = load_model(model_dir)    
     scores = model.score(X, y)
-    print("Naive model scores for the provided dataset: ", scores)
+    tqdm.write("Naive model scores for the provided dataset: ", scores)
