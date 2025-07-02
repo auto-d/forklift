@@ -1,9 +1,9 @@
+import os
 import time 
 import gradio as gr
-import os
 from huggingface_hub import InferenceClient
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
-import torch 
+import spaces
 
 """
 For more information on `huggingface_hub` Inference API support, please check the docs: https://huggingface.co/docs/huggingface_hub/v0.22.2/en/guides/inference
@@ -19,8 +19,6 @@ qwen_model_id = "Qwen/Qwen2.5-0.5B-Instruct"
 base_client = InferenceClient(qwen_model_id, token=token)
 
 # Local Qwen2.5 variant 
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
 tuned_model_file = "models/1july0732/"
 tuned_model = AutoModelForCausalLM.from_pretrained(
     tuned_model_file,
@@ -31,6 +29,7 @@ tuned_model = AutoModelForCausalLM.from_pretrained(
 qwen_tokenizer = AutoTokenizer.from_pretrained(qwen_model_id, skip_special_tokens=True)
 streamer = TextIteratorStreamer(qwen_tokenizer, skip_prompt=True, skip_special_tokens=True)       
 
+@spaces.GPU
 def respond_qwen(message,
     history: list[tuple[str, str]],
     system_message,
@@ -63,6 +62,9 @@ def respond_qwen(message,
             # We are synchronous here, but simulate some typing to keep things satisfying. 
             time.sleep(0.02)
 
+# TODO: this inference endpoint periodically has a fit, ironic that the fine-tuned is stable
+# replace this with a local load of qwen
+@spaces.GPU
 def respond_base(
     message,
     history: list[tuple[str, str]],

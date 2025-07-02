@@ -1,8 +1,10 @@
-test/*
-runs/* 
-secrets/* 
-models/* 
-data/* 
+test/
+runs/ 
+secrets/ 
+models/
+data/ 
+linux
+cscope* 
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
