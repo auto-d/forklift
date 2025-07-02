@@ -187,5 +187,4 @@ def test(model_dir, dataset):
     X, y = load_dataset(dataset)
     model = load_model(model_dir)    
     scores = model.score(X, y)
-    tqdm.write("Naive model scores for the provided dataset: ")
-    tqdm.write(str(scores))
+    tqdm.write(f"Naive mean scores for the provided dataset: {np.mean(scores)}")
