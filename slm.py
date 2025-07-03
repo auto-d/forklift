@@ -10,7 +10,7 @@ def summarize_history(history):
     Mine some salient history 
     """
     df = pd.DataFrame(history) 
-    s = (f"***************************")
+    s = (f"***************************\n")
     s += f"Completed {df.epoch.max():.4} epochs ({df.step.max()} steps)\n"
     s += f" - Loss {df.loss.max():.3f} -> {df.loss.min():.3f}\n"
     s += f" - Eval runtime: {df.eval_runtime.sum():.2f}s ({df.eval_runtime.mean():.2f}s/eval)\n"
@@ -67,6 +67,7 @@ def sft(dataset, model="facebook/opt-350m", batch_size=8, max_steps=-1, epochs=1
         max_steps=max_steps, 
         per_device_train_batch_size=batch_size,
         eval_strategy="steps", 
+        eval_steps=50, 
         report_to="tensorboard",         
         **config_args
     )
@@ -165,13 +166,6 @@ def train(dataset_path, model_path, batch_size=8, steps=None, epochs=1):
     # TODO: add a sanity check to validate the model's sequence length and flag any 
     # training data that will be truncated during training
     tqdm.write("Supervised fine-tuning complete!") 
-
-    if model != None: 
-        #dpo_dataset = build_dpo_dataset(dataset)
-        #model = dpo(dataset=dpo_dataset, model=model)
-
-        #tqdm.write("DPO complete!") 
-        pass
 
 def test(dataset):
     pass

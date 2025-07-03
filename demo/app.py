@@ -14,64 +14,40 @@ model_dir = "models"
 token = os.getenv('HF_MODEL_TOKEN') 
 print("Using token: ", token)
 
-# HF infra baseline
 qwen_model_id = "Qwen/Qwen2.5-0.5B-Instruct"
 base_client = InferenceClient(qwen_model_id, token=token)
 
-# Local Qwen2.5 variant 
-tuned_model_file = "models/1july0732/"
-tuned_model = AutoModelForCausalLM.from_pretrained(
-    tuned_model_file,
+# Local Qwen2.5 instruct
+base_model = AutoModelForCausalLM.from_pretrained(
+    "models/base/",
     torch_dtype="auto",
     device_map="auto", 
     local_files_only=True
 )
-qwen_tokenizer = AutoTokenizer.from_pretrained(qwen_model_id, skip_special_tokens=True)
-streamer = TextIteratorStreamer(qwen_tokenizer, skip_prompt=True, skip_special_tokens=True)       
+base_tokenizer = AutoTokenizer.from_pretrained(qwen_model_id, skip_special_tokens=True)
+base_streamer = TextIteratorStreamer(base_tokenizer, skip_prompt=True, skip_special_tokens=True)       
 
-@spaces.GPU
-def respond_qwen(message,
-    history: list[tuple[str, str]],
-    system_message,
-    max_tokens,
-    temperature
-):
+# Local Qwen2.5 variant trained on synthetic linux kernel dataset
+tuned_model = AutoModelForCausalLM.from_pretrained(
+    #"models/sft/",
+    "models/linux_slim/",
+    torch_dtype="auto",
+    device_map="auto", 
+    local_files_only=True
+)
+sft_tokenizer = AutoTokenizer.from_pretrained(qwen_model_id, skip_special_tokens=True)
+sft_streamer = TextIteratorStreamer(sft_tokenizer, skip_prompt=True, skip_special_tokens=True)       
 
-    # Two things here... can we omit the explicit tokenizer call and what happens when we change the message 
-    # formatting to ... 
-    # TODO ensure any completions we're doing are with the help of the GPU! ... test that on HF, we'll need to 
-    # move to the sliced GPU setup? ugh
-    messages = [ {"role": "system", "content": system_message} ]
-    messages.extend(history)
-    messages.append({"role": "user", "content": message})
-
-    text = qwen_tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-    model_inputs = qwen_tokenizer([text], return_tensors="pt").to(tuned_model.device)
-
-    tuned_model.generate(**model_inputs,max_new_tokens=max_tokens, temperature=temperature, streamer=streamer)
-    
-    response = ""    
-    for text in streamer: 
-        if text != "":             
-            response += text
-            yield response
-            # We are synchronous here, but simulate some typing to keep things satisfying. 
-            time.sleep(0.02)
-
-# TODO: this inference endpoint periodically has a fit, ironic that the fine-tuned is stable
-# replace this with a local load of qwen
-@spaces.GPU
-def respond_base(
+def respond_base_remote(
     message,
     history: list[tuple[str, str]],
     system_message,
     max_tokens,
     temperature
 ):
+    """
+    Use the remote huggingface inference endpoint ... beware of timeouts and errors!
+    """
     messages = [{"role": "system", "content": system_message}]
     messages.extend(history)
     messages.append({"role": "user", "content": message})
@@ -89,38 +65,105 @@ def respond_base(
         response += token
         yield response
 
+@spaces.GPU
+def respond_base(message,
+    history: list[tuple[str, str]],
+    system_message,
+    max_tokens,
+    temperature
+):
+    """
+    Implement a chat response with our base model, which seems to be really struggling in the 
+    HF inference API... moving "local" to HF spaces to see if the sporadic errors cease. 
+    """
+    messages = [ {"role": "system", "content": system_message} ]
+    messages.extend(history)
+    messages.append({"role": "user", "content": message})
+
+    text = base_tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+    model_inputs = base_tokenizer([text], return_tensors="pt").to(base_model.device)
+
+    base_model.generate(**model_inputs,max_new_tokens=max_tokens, temperature=temperature, streamer=base_streamer)
+    
+    response = ""    
+    for text in base_streamer: 
+        if text != "":             
+            response += text
+            yield response
+            # We are synchronous here, but simulate some typing to keep things satisfying. 
+            time.sleep(0.02)
+
+@spaces.GPU
+def respond_sft(message,
+    history: list[tuple[str, str]],
+    system_message,
+    max_tokens,
+    temperature
+):
+    """
+    Implement a chat response with our tuned model 
+    """
+
+    messages = [ {"role": "system", "content": system_message} ]
+    messages.extend(history)
+    messages.append({"role": "user", "content": message})
+
+    text = sft_tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+    model_inputs = sft_tokenizer([text], return_tensors="pt").to(tuned_model.device)
+
+    tuned_model.generate(**model_inputs,max_new_tokens=max_tokens, temperature=temperature, streamer=sft_streamer)
+    
+    response = ""    
+    for text in sft_streamer: 
+        if text != "":             
+            response += text
+            yield response
+            # We are synchronous here, but simulate some typing to keep things satisfying. 
+            time.sleep(0.02)
+
 def app(): 
     """ 
     Function to organize Gradio app 
     """
+
     demo = gr.Blocks()
     with demo: 
-        gr.Markdown(value="# ⚙️ Welcome!")
-        chat_input = gr.Textbox() 
+        gr.Markdown(value="# 🤖 Forklift Demo")            
+        gr.Markdown(value="This application provides a side-by-side comparison of a base small language model and fine-tuned version. While overfitting was a concern, ultimatey training for just one epoch on 10K high-quality synthetic pairs was enough to impart increased sensitivity to and recall of Linux kernel code in the interprocess communication (IPC) subsystem. ")
+        gr.Markdown(value="*Refresh the application to start a new chat session.*")
         with gr.Row():
             with gr.Column(): 
                 gr.ChatInterface(
                     title="Qwen2.5-Instruct 0.5b",
                     fn=respond_base,
-                    textbox=chat_input, 
+                    textbox=gr.Textbox(), 
                     additional_inputs=[
                         gr.Textbox(value="You are a friendly Chatbot.", label="System message"),
-                        gr.Slider(minimum=1, maximum=2048, value=512, step=1, label="Max new tokens"),
+                        gr.Slider(minimum=1, maximum=500, value=200, step=1, label="Max tokens to generate"),
                         gr.Slider(minimum=0.1, maximum=4.0, value=0.7, step=0.1, label="Temperature")
                     ],
                     type="messages") 
             with gr.Column(): 
                 gr.ChatInterface(
                     title="Qwen2.5-Instruct 0.5b Linux-tuned",
-                    fn=respond_qwen,
-                    textbox=chat_input, 
+                    fn=respond_sft,
+                    textbox=gr.Textbox(), 
                     additional_inputs=[
                         gr.Textbox(value="You are a friendly Chatbot.", label="System message"),
-                        gr.Slider(minimum=1, maximum=2048, value=512, step=1, label="Max new tokens"),
+                        gr.Slider(minimum=1, maximum=500, value=200, step=1, label="Max tokens to generate"),
                         gr.Slider(minimum=0.1, maximum=4.0, value=0.7, step=0.1, label="Temperature")
                     ],
                     type="messages")         
-        demo.launch(share=False)
+
+        demo.launch(share=True)
 
 if __name__ == "__main__":
     app()

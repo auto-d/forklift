@@ -632,10 +632,10 @@ def build(input_dirs, openai_key, output_dir):
 
         backends = [
             #{'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'llama3.1:8b'},
-            #{'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'qwen2.5-coder:3b'},
+            {'type':'ollama', 'url': "http://localhost:11434/v1", 'model': 'qwen2.5-coder:3b'},
             # This guy's a little too slow to participate in the larger campaign... 
             #{'type':'ollama', 'url': "http://10.0.0.37:11435/v1", 'model': 'qwen2.5-coder:3b'},
-            #{'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'},
+            {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-mini'},
             {'type':'openai', 'api_key': openai_key,'model': 'gpt-4.1-nano'}
             ]
         

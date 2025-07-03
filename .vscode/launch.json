@@ -21,7 +21,8 @@
             "console": "integratedTerminal", 
             //"args": ["train","--dataset","./data/test/init.parquet","--model","./models/test","--nn_steps","10"],
             //"args": ["train","--dataset","data/30june0116/init.parquet","--model","./models/test","--nn_epochs","1"],
-            "args": ["train","--dataset","data/30june0116/init.parquet","--model","./models/test","--nn_steps","20"],
+            //"args": ["train","--dataset","data/30june0116/init.parquet","--model","./models/test","--nn_steps","20"],
+            "args": ["train","--dataset","data/test/init.parquet","--type","classic","--model","./models/classic"],
             "justMyCode": false
         },
         {
@@ -30,7 +31,7 @@
             "request": "launch",
             "program": "main.py",
             "console": "integratedTerminal", 
-            "args": ["test","--model","./models/base.xyz"],
+            "args": ["test","--model","./models/naive/", "--dataset", "data/init/init.parquet", "--type", "naive"],
             "justMyCode": false
         },
         {

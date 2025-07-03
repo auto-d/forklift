@@ -2,16 +2,7 @@
 
 Lift your understanding of any repo! 📦⬆
 
-## TODO 
-
-- update the deploy app to allow side-by-side interaction with the fine-tuned model
-- use the deploy automation to push the new model and the reference to HF spaces
-- decide on evaluation strategy ... 
-    - Can we just use an embedding distance or angle here? perhaps cosine similarity to give us a better idea of how far off we are? -- we'll need to add embeddings to the dataset... compute at evaluation time or during generation? i
-- use a PEFT fine-tuning operation and see how things change WRT training time, VRAM, etc. 
-
-- implement HMM model 
-- implement naive model ... bent's input...
+The dedicated HuggingFace Spaces hoosted at https://3emaphor-forklift.hf.space/ is struggling with online inference. Please use https://43422445f01f1ec4e1.gradio.live/ to view a demonatration.
 
 ## Problem 
 
@@ -42,7 +33,7 @@ The `init` subsystem for the Linux kernel defines a specific file called "init.h
 
 In the above example, we can be charitable about the limitations of a 500-billion parameter model yet want to improve on domain-specific Q&A that a model of this size could support. 
 
-Depending on the nature of the code and it's complexity, and the degree to which it was available during training, the above issues can result in a significant gap betwween the promise of language models and their ultimate value in this context. Superfised fine tuning (SFT) and reinforcement learning (RL) methods provide an answer to this performance gap, however implementing these methods to improve LLM performance on codebase comprehension has not to the author's knowledge been advertised. A solution for improving LLM performance on specific codebases is proposed here accordingly. 
+Depending on the nature of the code and it's complexity, and the degree to which it was available during training, the above issues can result in a significant gap betwween the promise of language models and their ultimate value in this context. Supervised fine tuning (SFT) and reinforcement learning (RL) methods provide an answer to this performance gap, however implementing these methods to improve LLM performance on codebase comprehension has not to the author's knowledge been advertised. A solution for improving LLM performance on specific codebases is proposed here accordingly. 
 
 ## Data Sources
 
@@ -75,21 +66,19 @@ A number of prior efforts exist to improve performance on specific codebases, bu
 
 Transfer learning on language models has become status quo for those looking to imbue these models with domain-specific awareness or condition their behavior on a custom dataset [2]. Two primary techniques are widely used: 
 - Superfised fine tuning (SFT) : Use of domain-specific data in a training loop to revise model weights to align with the provided data and an associated loss function 
-- Reinforcement learning (RL) : 
+- Reinforcement learning (RL) : Use of a proxy reward function usually trained on human feedback. Recent advances such as direct preference optimization (DPO) eschew the training of a reward model and allow preference pairs to be used to improve generalization. 
 
-As outlined in [3], SFT and RL have different outcomes on model behavior. The former drives rote memorization and decreases general performance, while the latter struggles to learn facts but supports generalization. In tandem, the two are a powerful combination to alter a language model's encoded knowledge *and* improve it's ability to generalize to tasks that require application of that knowledge. 
+As outlined in [3], SFT and RL/DPO have different outcomes on model behavior. The former drives rote memorization and decreases general performance, while the latter struggles to learn facts but supports generalization. In tandem, the two are a powerful combination to alter a language model's encoded knowledge *and* imorove it's ability to generalize to tasks that require application of that knowledge. 
 
 ## Model Evaluation and Selection 
 
-Contemporary language models based on neural networks (NN) display  emergent natural language fluency and reasoning abilities that dramatically outstrip their naive and classical machine-learning counterparts. However, to establish a baseline, and hedge against total model collapse during fine-tuning, results are also reported for 
-
-- Hidden Markov Model 
+Contemporary language models based on neural networks (NN) display  emergent natural language fluency and reasoning abilities that dramatically outstrip their naive and classical machine-learning counterparts. However, to establish a baseline, and hedge against total model collapse during fine-tuning, results are also reported for a classical method and a naive method. 
 
 ### SFT Suitability 
 
 In testing, SFT on Meta's OPT-350, a 350-million parameter language model, for 3 epochs of 25,000 training examples each had the following characteristics: 
 - 100% GPU utilization throughout 
--  13GB VRAM usage thoughout
+- 13GB VRAM usage thoughout
 - 2 CPU cores partially utilized
 - 13 minutes per epoch for a total run-time of 40 minutes
 
@@ -101,40 +90,16 @@ In [4], a 14-billion parameter code-specific models is the target of a reinforce
 
 ### Data Processing Pipeline 
 
-
-**Repository Decomposition** 
-
-1. Ctags : Generates an index of symbols for the target repository
-   - Example invocation: `ctags -R --output-format=json --fields=+nksSaf --extras=+q -o linux_kernel.ctags ../../../linux/kernel/` will extract all symbols (even anonymous or implicit ones), enrich with some supplemental information and dump to disk at the file indicated by `-o`. 
-2. Cscope: Extracts rich symbol reference information
-   - a
-   - b
-3. Apply heuristics to generat
-   - Apply a series of heuristics to generate prompts and reference information to pass to an LLM for completion
-   - E.g. 
-    - prompt: 'What file is BUG defined in?'
-    - quality answer 1 (for SFT): 'The symbol `BUG` is defined in the `../../linux/init/Kconfig` file at line 1670.'
-    - quality answer 2 (preferred DPO answer)): 'BUG is defined in `../../linux/init/Kconfig`.'
-    - unpreferred answer (for DPO): 'The `BUG()` macro is defined in `<linux/bug.h>`.'
-    - reframing of the question to induce variance for SFT: 'x' ='Where is the `BUG` symbol defined in the Linux kernel configuration?'
-    - reframing of the qutestiont to induce variance for DPO: 'x2' ='Where is the `BUG` symbol defined in the Linux kernel source code?'
+The data processing pipeline consists of the following: 
+- Linux kernel source code download
+- Synthetic dataset generation based on recursive decomposition of the codebase to generate Q&A pairs as well as preference data for potential future refinement with DPO
 
 **Superfised Fine-Tuning (SFT)**
 1. Recursively decompose our target codebase to appreciate various *facets* that we can generate prompt pairs for by recruiting a foundation model (here GPT4.1 mini)
 2. Apply a parameter-efficient fine-tuning (PEFT) strategy to limit the amount of parameters we need to learn/update when executing the transfer learning operation 
 3. Train the model as usual, providing samples to support a forward pass and propagating the gradient of backwards to adjust model parameters for some number of epochs
 
-**Reinforcement Learning (RL)** 
-1. Rollout : pre-trained model is used to generate completions
-2. Evaluation : we assess the value of the completion against our reference, yielding a scalar value to drive reinforcement learning 
-3. Optimiztion : 
-
-### Models
-
-### 
-
 ## Repository Layout
-
 
 The repository is laid out as follows
 
@@ -149,19 +114,24 @@ The repository is laid out as follows
 - `models` : Base and tuned models 
 - `notebooks` : Various notebooks for experimentation and prototyping
   
-## Quickstart 
-
-All testing done with Python 3.12
-
-1. `pip install -r requirements.txt` 
 
 ## Usage 
 
-`forklift 
-`--build`
-`--train`
-`--test`
-`--deploy` : requires HF_TOKEN environment variable to be set. This can be manually exported or alternatively,  is implicit after a `huggingface-cli login` completes. 
+```
+usage: forklift train [-h] --dataset DATASET --model_dir MODEL_DIR [--nn_steps NN_STEPS] [--nn_epochs NN_EPOCHS] [--type {naive,classic,neural}]
+```
+
+The `forklift` script runs in four modes:
+- `--build`
+- `--train`
+- `--test`
+- `--deploy` 
+
+Note the deployment omde requires HF_TOKEN environment variable to be set. This can be manually exported or alternatively,  is implicit after a `huggingface-cli login` completes. 
+
+**Examples**
+- `python main.py test --model models/naive --dataset data/ipc/ipc.parquet --type naive`
+- `python main.py train --dataset data/test/init.parquet --model_dir models/classic --type classic`
 
 ### Building a Dataset
 
@@ -183,78 +153,41 @@ Wrote dataset for linux/init to ./data/30june0116/init.parquet.
 Generation campaign complete!
 ```
 
-```
-usage: forklift train [-h] --dataset DATASET --model_dir MODEL_DIR [--nn_steps NN_STEPS] [--nn_epochs NN_EPOCHS] [--type {naive,classic,neural}]
-```
-
-
+After completing, statistics will be shown on model usage:
 
 ```
 Model usage:
           model  in_tokens  out_tokens        time        tps
 0  gpt-4.1-mini      11504        6668  150.910258  44.185200
 1  gpt-4.1-nano      11297        5508  136.195672  40.441814
-2   llama3.1:8b      13748        7557   99.836880  75.693471
+2  llama3.1:8b      13748        7557   99.836880  75.693471
 ```
-Above configuration was estimated to take `259:28:49` hours (10 days!) -- the token rate is sort of less than expected. 
 
-Model usage:
-              model  in_tokens  out_tokens        time         tps
-0      gpt-4.1-nano      15240        7500  157.736843   47.547547
-1  qwen2.5-coder:3b      20788       12170  104.064007  116.947255
-
-Dataset generated (3732 rows).
-Model usage:
-          model  in_tokens  out_tokens          time        tps
-0  gpt-4.1-nano    4291928     1542930  26757.451113  57.663564
-
-
-**Visualizing Training Loss** 
-
-If tensorboard is installed (`pip install tensorboard`), we should be able to visualize SFT runs with the included web application. 
-- ` tensorboard --logdir=runs` 
-- visit http://localhost:6006
-  
 ## Demo Application
 
-The [demo](./demo) directory contains a Gradio app compatible with HuggingFace Spaces. This repository is manually mirrored to a HuggingFace repository which auto-deploys any changes to the hosted virtual environment. The resulting application can be found here: https://huggingface.co/spaces/3emaphor/forklift
+The [demo](./demo) directory contains a Gradio app compatible with HuggingFace Spaces. This repository is manually mirrored to a HuggingFace repository which auto-deploys any changes to the hosted virtual environment. 
 
 ## Results and Conclusions
 
-### Challenges 
+### Naive 
 
-- Foundational model latency and potential throttling ... 
-  - gpt-4.1-nano
-    ```
-    Sent 77 tokens to gpt-4.1-nano, received 61 tokens after 10.6s
-    Sent 71 tokens to gpt-4.1-nano, received 13 tokens after 0.902s
-    Sent 33 tokens to gpt-4.1-nano, received 13 tokens after 0.606s
-    Sent 167 tokens to gpt-4.1-nano, received 18 tokens after 20.7s
-    Sent 167 tokens to gpt-4.1-nano, received 18 tokens after 20.5s
-    Sent 80 tokens to gpt-4.1-nano, received 101 tokens after 21.2s
-    ```
-  - gpt-4.1-mini
-    ```
-    Sent 77 tokens to gpt-4.1-mini, received 41 tokens after 1.15s
-    Sent 71 tokens to gpt-4.1-mini, received 42 tokens after 0.936s
-    Sent 33 tokens to gpt-4.1-mini, received 20 tokens after 0.554s
-    Sent 147 tokens to gpt-4.1-mini, received 21 tokens after 20.9s
-    Sent 147 tokens to gpt-4.1-mini, received 20 tokens after 20.9s
-    Sent 80 tokens to gpt-4.1-mini, received 170 tokens after 23.4s
-    Sent 74 tokens to gpt-4.1-mini, received 164 tokens after 23.6s
-    Sent 32 tokens to gpt-4.1-mini, received 32 tokens after 21.0s
-    Sent 280 tokens to gpt-4.1-mini, received 23 tokens after 20.9s
-    Sent 280 tokens to gpt-4.1-mini, received 33 tokens after 20.9s
-    Sent 51 tokens to gpt-4.1-mini, received 192 tokens after 24.5s
-    Sent 45 tokens to gpt-4.1-mini, received 140 tokens after 22.7s
-    Sent 33 tokens to gpt-4.1-mini, received 62 tokens after 1.46s
-    Sent 272 tokens to gpt-4.1-mini, received 21 tokens after 21.1s
-    Sent 272 tokens to gpt-4.1-mini, received 21 tokens after 20.9s
-    Sent 50 tokens to gpt-4.1-mini, received 131 tokens after 22.6s
-    Sent 44 tokens to gpt-4.1-mini, received 97 tokens after 21.6s
-    Sent 32 tokens to gpt-4.1-mini, received 93 tokens after 21.6s
-    ```
-  
+The naive symbol-matching strategy produces horrific results. We ultimately failed to nominate many reasonable synmbols based on input text. 
+
+### Classic - Hidden Markov Model
+
+Ex 1: 
+- Input: "Where is the macro `COMPAT_SHMLBA` defined in the Linux kernel source code?"
+- Target output: "`COMPAT_SHMLBA` is defined in `linux/ipc/shm.c` at line 1706."
+- HMM output: "summary headers associated ` trace/ ` kernel?`create_trace_points ` usually ` events ` specifically suggests locate test ` initialization defined registration registration tracepoint \n\n indirectly ` tracepoint_probe_register trace/ ` functions defined tracepoint registration \n ` apis ` source create_trace_points include create_trace_points \n\n defined code trace_event file registration ` ` ` <"
+
+Ex 2: 
+- Input: "'Where is the `ipc_init` function defined in the Linux kernel source, and what is its linkage scope?'"
+- Target output: "'The symbol `ipc_init` is defined as a static function in `linux/ipc/util.c` at line 90, indicating internal linkage within that translation unit. Since it is declared `static`, it is not visible outside `util.c`, and there are no other definitions of `ipc_init` elsewhere in the kernel source. Its only definition is within `linux/ipc/util.c`.'"
+- HMM output: "'tracepoint ` macro ` summary pattern \n linux tracepoint_register trace point ` source tracepoints.h tracepoint_register \n include  \n invoked code \n ` create_trace_points main.c macro defined key context ` registration ` ` tracepoints define_trace create_trace_points ` ` actual tracepoints ` shown invocation subsystem code ` expansion ` tracepoints.c create_trace_points `'"
+
+### SLM-based Fine-Tune
+
+The SLM performed better than expected, with the desired knowledge being imparted from various Linux subsystems. 
 
 ## Ethics Statement
 
