@@ -2,8 +2,6 @@
 
 Lift your understanding of any repo! 📦⬆
 
-The dedicated HuggingFace Spaces hoosted at https://3emaphor-forklift.hf.space/ is struggling with online inference. Please use https://43422445f01f1ec4e1.gradio.live/ to view a demonatration.
-
 ## Problem 
 
 It is common for software engineers and information technology practitioners to encounter unfamiliar codebases. These individuals may be asked to troubleshoot, refactor, or reason about the underlying capabilities or limitations. Approaching these tasks without a working knowledge of the codebase risks inducing unintended behavior or incorrectly assessing the scope of work. However, developing a working knowledge of a large codebase is a daunting task. Seasoned software engineers can take years to master a large software project. 
